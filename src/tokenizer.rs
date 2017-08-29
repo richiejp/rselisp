@@ -1,0 +1,108 @@
+use std::str::Chars;
+use std::iter::Peekable;
+
+#[derive(Debug)]
+pub enum Token {
+    Spc,
+    Qot,
+    Lbr(char),
+    Rbr(char),
+    Atm(String),
+    Str(String)
+}
+
+pub trait Tokenizer {
+    fn inv_brk(c: char) -> char {
+        match c {
+            '(' => ')',
+            ')' => '(',
+            '[' => ']',
+            ']' => '[',
+            '{' => '}',
+            '}' => '{',
+            c => panic!("Unrecognised bracket char '{}'", c),
+        }
+    }
+    
+    fn tok_spc(&self, itr: &mut Peekable<Chars>) -> Result<Token, &'static str> {
+        loop {
+            if let Some(&c) = itr.peek() {
+                match c {
+                    ' ' | '\t' | '\n' | '\r' => itr.next(),
+                    _ => break Ok(Token::Spc),
+                };
+            } else {
+                break Ok(Token::Spc);
+            }
+        }
+    }
+
+    fn tok_str(&self, q: char, itr: &mut Peekable<Chars>) -> Result<Token, &'static str> {
+        let mut s = String::new();
+        
+        while let Some(c) = itr.next() {
+            match c {
+                '\\' => match itr.next() {
+                    Some(c) if c == q => s.push(c),
+                    Some('n') => s.push('\n'),
+                    Some('t') => s.push('\t'),
+                    Some('r') => s.push('\r'),
+                    Some('\\') => s.push('\\'),
+                    Some(l) => {
+                        s.push(c);
+                        s.push(l);
+                    },
+                    None => break,
+                },
+                _ if c == q => return Ok(Token::Str(s)),
+                l => s.push(l),
+            }
+        }
+
+        Err("EOF while tokenizing string")
+    }
+
+    fn tok_atom(&self, l: char, itr: &mut Peekable<Chars>) -> Result<Token, &'static str> {
+        let mut s = String::new();
+        s.push(l);
+
+        while let Some(&c) = itr.peek() {
+            match c {
+                ' ' | '\t' | '\n' | '\r' | '(' | '{' | '[' | ']' | '}' | ')'
+                    => return Ok(Token::Atm(s)),
+                _ => {s.push(c); itr.next()},
+            };
+        }
+
+        Err("EOF while tokenizing atom")
+    }
+
+    fn tokenize(&self, input: &String) -> Result<Vec<Token>, &'static str> {
+        let mut toks = Vec::<Token>::new();
+        let mut itr = input.chars().peekable();
+        
+        while let Some(c) = itr.next() {
+            let res = match c {
+                ' ' | '\t' | '\n' | '\r' => self.tok_spc(&mut itr),
+                '(' | '{' | '[' => Ok(Token::Lbr(c)),
+                ')' | '}' | ']' => Ok(Token::Rbr(c)),
+                '"' => self.tok_str('"', &mut itr),
+                '\'' => {
+                    if Some(&'(') == itr.peek() {
+                        Ok(Token::Qot)
+                    } else {
+                        self.tok_str('\'', &mut itr)
+                    }
+                },
+                _ => self.tok_atom(c, &mut itr)
+            };
+            match res {
+                Ok(Token::Spc) => (),
+                Ok(tok) => toks.push(tok),
+                Err(e) => return Err(e),
+            }
+        }
+
+        Ok(toks)
+    }
+}
