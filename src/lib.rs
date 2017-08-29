@@ -98,30 +98,75 @@ trait Func {
     fn call(&self, &mut Iter<Inner>) -> Result<Inner, String>;
 }
 
-#[derive(Clone)]
-struct PlusBuiltin { }
-impl Func for PlusBuiltin {
-    fn eval_args(&self) -> EvalOption {
-        EvalOption::Evaluated
-    }
-    
-    fn name(&self) -> &'static str {
-        "+"
-    }
-    
-    fn call(&self, args: &mut Iter<Inner>) -> Result<Inner, String> {
-        let mut res = 0;
+macro_rules! def_builtin {
+    ($name:expr, $rname:ident, $evaled:ident, $args:ident; $fn_body:block ) => (
+        #[derive(Clone)]
+        struct $rname { }
+        impl Func for $rname {
+            fn eval_args(&self) -> EvalOption {
+                EvalOption::$evaled
+            }
 
-        while let Some(arg) = args.next() {
-            match arg {
-                &Inner::Int(i) => res += i,
-                _ => return Err(format!("Expected int, but found {:?}", arg)),
-            };
+            fn name(&self) -> &'static str {
+                $name
+            }
+
+            fn call(&self, $args: &mut Iter<Inner>) -> Result<Inner, String> {
+                $fn_body
+            }
         }
-
-        Ok(Inner::Int(res))
-    }
+    )
 }
+
+def_builtin! { "-", MinusBuiltin, Evaluated, args; {
+    let mut res = 0;
+
+    if let Some(arg) = args.next() {
+        match arg {
+            &Inner::Int(i) => res = i,
+            _ => return Err(format!("Expected int, but found {:?}", arg)),
+        }
+    }
+
+    if let Some(arg) = args.next() {
+        match arg {
+            &Inner::Int(i) => res -= i,
+            _ => return Err(format!("Expected int, but found {:?}", arg)),
+        }
+    } else {
+        res = -res;
+    }
+
+    while let Some(arg) = args.next() {
+        match arg {
+            &Inner::Int(i) => res -= i,
+            _ => return Err(format!("Expected int, but found {:?}", arg)),
+        };
+    }
+
+    Ok(Inner::Int(res))
+}}
+
+def_builtin! { "+", PlusBuiltin, Evaluated, args; {
+    let mut res = 0;
+
+    while let Some(arg) = args.next() {
+        match arg {
+            &Inner::Int(i) => res += i,
+            _ => return Err(format!("Expected int, but found {:?}", arg)),
+        };
+    }
+
+    Ok(Inner::Int(res))
+}}
+
+def_builtin! { "quote", QuoteBuiltin, Unevaluated, args; {
+    let argt = (args.next(), args.next());
+    match argt {
+        (Some(arg), None) => Ok(arg.clone()),
+        _ => Err(format!("Wrong number of arguments; quote only accepts one")),
+    }
+}}
 
 struct Namespace {
     funcs: HashMap<String, Rc<Func>>,
@@ -152,6 +197,8 @@ impl Lsp {
         let mut g = Namespace::new();
 
         g.reg(PlusBuiltin { });
+        g.reg(MinusBuiltin { });
+        g.reg(QuoteBuiltin { });
 
         Lsp {
             globals: g,
