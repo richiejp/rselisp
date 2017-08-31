@@ -17,7 +17,7 @@ use std::io::stdin;
 
 extern crate rselisp;
 
-use rselisp::Lsp;
+use rselisp::{Lsp, Inner};
 
 fn main() {
     let mut lsp = Lsp::new();
@@ -30,6 +30,7 @@ fn main() {
             Ok(_) => {
                 match lsp.read(&line) {
                     Ok(sexp) => match lsp.eval(&sexp) {
+                        Ok(Inner::Sym(ref s)) if s == "exit" => break,
                         Ok(resexp) => println!("-> {:?}", resexp),
                         Err(e) => println!("EVAL ERROR: {}", e),
                     },
@@ -39,4 +40,6 @@ fn main() {
             Err(e) => { println!("I/O ERROR: {}", e); break; },
         }
     }
+
+    println!("'(Good bye!)");
 }

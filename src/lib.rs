@@ -16,6 +16,7 @@
 use std::slice::Iter;
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::fmt;
 
 mod tokenizer;
 use tokenizer::*;
@@ -35,6 +36,18 @@ impl Inner {
             sxp
         } else {
             panic!("Not an Sexp");
+        }
+    }
+}
+
+impl fmt::Display for Inner {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            &Inner::Int(i) => write!(f, "{}", i),
+            &Inner::Str(ref s) => write!(f, "\"{}\"", s),
+            &Inner::Sym(ref s) => write!(f, "{}", s),
+            &Inner::Sxp(ref sxp) => write!(f, "{}", sxp),
+            &Inner::Lambda(ref fun) => write!(f, "{}", fun),
         }
     }
 }
@@ -67,13 +80,6 @@ impl Sexp {
         }
     }
 
-    fn new_str(s: &str) -> Sexp {
-        Sexp {
-            delim: '(',
-            lst: vec![Inner::Str(s.to_owned())]
-        }
-    }
-    
     fn push(&mut self, child: Inner) {
         self.lst.push(child);
     }
@@ -85,6 +91,26 @@ impl Sexp {
     fn new_inner_sxp(&mut self, delim: char) -> &mut Sexp {
         self.lst.push(Inner::Sxp(Sexp::new(delim)));
         self.lst.last_mut().unwrap().ref_sxp()
+    }
+}
+
+fn fmt_iter<E, F>(brk: char, itr: &mut Iter<E>, f: &mut F) -> fmt::Result
+    where E: fmt::Display, F: fmt::Write
+{
+    if let Some(first) = itr.next() {
+        write!(f, "{}{}", brk, first)?;
+        for elt in itr {
+            write!(f, " {}", elt)?;
+        }
+        write!(f, "{}", Lsp::inv_brk(brk))
+    } else {
+        write!(f, "nil")
+    }
+}
+
+impl fmt::Display for Sexp {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            fmt_iter('(', &mut self.lst.iter(), f)
     }
 }
 
@@ -105,10 +131,33 @@ pub struct ArgSpec {
     name: String,
 }
 
+impl fmt::Display for ArgSpec {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", &self.name)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct ArgSpecs(Vec<ArgSpec>);
+
+impl std::ops::Deref for ArgSpecs {
+    type Target = Vec<ArgSpec>;
+
+    fn deref(&self) -> &Vec<ArgSpec> {
+        &self.0
+    }
+}
+
+impl fmt::Display for ArgSpecs {
+fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fmt_iter('[', &mut self.iter(), f)
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct UserFunc {
     name: String,
-    args: Vec<ArgSpec>,
+    args: ArgSpecs,
     body: Inner,
 }
 
@@ -116,7 +165,7 @@ impl UserFunc {
     fn new(name: String, args: Vec<ArgSpec>, body: Inner) -> UserFunc {
         UserFunc {
             name: name,
-            args: args,
+            args: ArgSpecs(args),
             body: body,
         }
     }
@@ -140,6 +189,12 @@ impl Func for Box<UserFunc> {
     }
 }
 
+impl fmt::Display for UserFunc {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "('{} . (lambda {} {}))", &self.name, &self.args, &self.body)
+    }
+}
+
 macro_rules! def_builtin {
     ($name:expr, $rname:ident, $evaled:ident, $lsp:ident, $args:ident; $fn_body:block ) => (
         #[derive(Clone)]
@@ -160,7 +215,7 @@ macro_rules! def_builtin {
     )
 }
 
-def_builtin! { "-", MinusBuiltin, Evaluated, lsp, args; {
+def_builtin! { "-", MinusBuiltin, Evaluated, _lsp, args; {
     let mut res = 0;
 
     if let Some(arg) = args.next() {
@@ -189,7 +244,7 @@ def_builtin! { "-", MinusBuiltin, Evaluated, lsp, args; {
     Ok(Inner::Int(res))
 }}
 
-def_builtin! { "+", PlusBuiltin, Evaluated, lsp, args; {
+def_builtin! { "+", PlusBuiltin, Evaluated, _lsp, args; {
     let mut res = 0;
 
     while let Some(arg) = args.next() {
@@ -202,7 +257,7 @@ def_builtin! { "+", PlusBuiltin, Evaluated, lsp, args; {
     Ok(Inner::Int(res))
 }}
 
-def_builtin! { "quote", QuoteBuiltin, Unevaluated, lsp, args; {
+def_builtin! { "quote", QuoteBuiltin, Unevaluated, _lsp, args; {
     let argt = (args.next(), args.next());
     match argt {
         (Some(arg), None) => Ok(arg.clone()),
@@ -210,7 +265,7 @@ def_builtin! { "quote", QuoteBuiltin, Unevaluated, lsp, args; {
     }
 }}
 
-def_builtin! { "lambda", LambdaBuiltin, Unevaluated, lsp, args; {
+def_builtin! { "lambda", LambdaBuiltin, Unevaluated, _lsp, args; {
     match (args.next(), args.next()) {
         (Some(&Inner::Sxp(_)), Some(body)) => {
             Ok(Inner::Lambda(Box::new(
@@ -235,6 +290,17 @@ def_builtin! { "defalias", DefaliasBuiltin, Evaluated, lsp, args; {
     fun.name = name.to_owned();
     lsp.globals.reg_fn(fun);
     Ok(Inner::Sym(name.to_owned()))
+}}
+
+def_builtin! { "print", PrintBuiltin, Evaluated, _lsp, args; {
+    let mut s = String::new();
+    let _res = fmt_iter('(', args, &mut s);
+    println!("{}", &s);
+    Ok(Inner::Str(s))
+}}
+
+def_builtin! { "exit", ExitBuiltin, Unevaluated, _lsp, _args; {
+    Ok(Inner::Sym("exit".to_owned()))
 }}
 
 struct Namespace {
@@ -274,6 +340,8 @@ impl Lsp {
         g.reg_fn(QuoteBuiltin { });
         g.reg_fn(LambdaBuiltin { });
         g.reg_fn(DefaliasBuiltin { });
+        g.reg_fn(PrintBuiltin { });
+        g.reg_fn(ExitBuiltin { });
 
         g.reg_var("t".to_owned(), Inner::Sym("t".to_owned()));
         g.reg_var("nil".to_owned(), Inner::Sxp(Sexp::nil()));

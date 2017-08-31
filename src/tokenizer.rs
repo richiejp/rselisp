@@ -35,7 +35,7 @@ pub trait Tokenizer {
             ']' => '[',
             '{' => '}',
             '}' => '{',
-            c => panic!("Unrecognised bracket char '{}'", c),
+            c => c,
         }
     }
     
