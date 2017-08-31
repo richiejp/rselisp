@@ -26,6 +26,7 @@ pub enum Inner {
     Str(String),
     Sym(String),
     Sxp(Sexp),
+    Lambda(Box<UserFunc>),
 }
 
 impl Inner {
@@ -87,6 +88,7 @@ impl Sexp {
     }
 }
 
+#[derive(Clone)]
 enum EvalOption {
     Evaluated,
     Unevaluated,
@@ -94,12 +96,52 @@ enum EvalOption {
 
 trait Func {
     fn eval_args(&self) -> EvalOption;
-    fn name(&self) -> &'static str;
-    fn call(&self, &mut Iter<Inner>) -> Result<Inner, String>;
+    fn name(&self) -> &str;
+    fn call(&self, &mut Lsp, &mut Iter<Inner>) -> Result<Inner, String>;
+}
+
+#[derive(Clone, Debug)]
+pub struct ArgSpec {
+    name: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct UserFunc {
+    name: String,
+    args: Vec<ArgSpec>,
+    body: Inner,
+}
+
+impl UserFunc {
+    fn new(name: String, args: Vec<ArgSpec>, body: Inner) -> UserFunc {
+        UserFunc {
+            name: name,
+            args: args,
+            body: body,
+        }
+    }
+}
+
+impl Func for UserFunc {
+    fn eval_args(&self) -> EvalOption { EvalOption::Evaluated }
+    fn name(&self) -> &str { &self.name }
+
+    fn call(&self, lsp: &mut Lsp, args: &mut Iter<Inner>) -> Result<Inner, String> {
+        lsp.eval_inner(&self.body)
+    }
+}
+
+impl Func for Box<UserFunc> {
+    fn eval_args(&self) -> EvalOption { EvalOption::Evaluated }
+    fn name(&self) -> &str { &self.name }
+
+    fn call(&self, lsp: &mut Lsp, args: &mut Iter<Inner>) -> Result<Inner, String> {
+        lsp.eval_inner(&self.body)
+    }
 }
 
 macro_rules! def_builtin {
-    ($name:expr, $rname:ident, $evaled:ident, $args:ident; $fn_body:block ) => (
+    ($name:expr, $rname:ident, $evaled:ident, $lsp:ident, $args:ident; $fn_body:block ) => (
         #[derive(Clone)]
         struct $rname { }
         impl Func for $rname {
@@ -111,14 +153,14 @@ macro_rules! def_builtin {
                 $name
             }
 
-            fn call(&self, $args: &mut Iter<Inner>) -> Result<Inner, String> {
+            fn call(&self, $lsp: &mut Lsp, $args: &mut Iter<Inner>) -> Result<Inner, String> {
                 $fn_body
             }
         }
     )
 }
 
-def_builtin! { "-", MinusBuiltin, Evaluated, args; {
+def_builtin! { "-", MinusBuiltin, Evaluated, lsp, args; {
     let mut res = 0;
 
     if let Some(arg) = args.next() {
@@ -147,7 +189,7 @@ def_builtin! { "-", MinusBuiltin, Evaluated, args; {
     Ok(Inner::Int(res))
 }}
 
-def_builtin! { "+", PlusBuiltin, Evaluated, args; {
+def_builtin! { "+", PlusBuiltin, Evaluated, lsp, args; {
     let mut res = 0;
 
     while let Some(arg) = args.next() {
@@ -160,12 +202,39 @@ def_builtin! { "+", PlusBuiltin, Evaluated, args; {
     Ok(Inner::Int(res))
 }}
 
-def_builtin! { "quote", QuoteBuiltin, Unevaluated, args; {
+def_builtin! { "quote", QuoteBuiltin, Unevaluated, lsp, args; {
     let argt = (args.next(), args.next());
     match argt {
         (Some(arg), None) => Ok(arg.clone()),
         _ => Err(format!("Wrong number of arguments; quote only accepts one")),
     }
+}}
+
+def_builtin! { "lambda", LambdaBuiltin, Unevaluated, lsp, args; {
+    match (args.next(), args.next()) {
+        (Some(&Inner::Sxp(_)), Some(body)) => {
+            Ok(Inner::Lambda(Box::new(
+                UserFunc::new("".to_owned(), Vec::new(), body.clone())
+            )))
+        },
+        _ => Err(format!("(lambda ([args]) [body])")),
+    }
+}}
+
+def_builtin! { "defalias", DefaliasBuiltin, Evaluated, lsp, args; {
+    let name = match args.next() {
+        Some(&Inner::Sym(ref name)) => name,
+        _ => return Err(format!("defalias expected symbol")),
+    };
+
+    let mut fun = match args.next() {
+        Some(&Inner::Lambda(ref lmbda)) => lmbda.clone(),
+        _ => return Err(format!("defalias expected lambda")),
+    };
+
+    fun.name = name.to_owned();
+    lsp.globals.reg_fn(fun);
+    Ok(Inner::Sym(name.to_owned()))
 }}
 
 struct Namespace {
@@ -181,8 +250,12 @@ impl Namespace {
         }
     }
 
-    fn reg<F: 'static + Func>(&mut self, fun: F) {
+    fn reg_fn<F: 'static + Func>(&mut self, fun: F) {
         self.funcs.insert(fun.name().to_owned(), Rc::new(fun));
+    }
+
+    fn reg_var(&mut self, name: String, var: Inner) {
+        self.vars.insert(name, Rc::new(var));
     }
 }
 
@@ -196,10 +269,15 @@ impl Lsp {
     pub fn new() -> Lsp {
         let mut g = Namespace::new();
 
-        g.reg(PlusBuiltin { });
-        g.reg(MinusBuiltin { });
-        g.reg(QuoteBuiltin { });
+        g.reg_fn(PlusBuiltin { });
+        g.reg_fn(MinusBuiltin { });
+        g.reg_fn(QuoteBuiltin { });
+        g.reg_fn(LambdaBuiltin { });
+        g.reg_fn(DefaliasBuiltin { });
 
+        g.reg_var("t".to_owned(), Inner::Sym("t".to_owned()));
+        g.reg_var("nil".to_owned(), Inner::Sxp(Sexp::nil()));
+        
         Lsp {
             globals: g,
         }
@@ -256,13 +334,25 @@ impl Lsp {
         }
     }
 
+    #[inline]
+    fn eval_sym(&self, sym: &str) -> Result<Inner, String> {
+        if let Some(val) = self.globals.vars.get(sym) {
+            Ok(Inner::clone(val))
+        } else {
+            Err(format!("No variable named {}", sym))
+        }
+    }
+
+    #[inline]
     fn eval_inner(&mut self, ast: &Inner) -> Result<Inner, String> {
         match ast {
+            &Inner::Sym(ref s) => self.eval_sym(s),
             &Inner::Sxp(ref sxp) => self.eval(sxp),
             _ => Ok(ast.clone()),
         }
     }
 
+    #[inline]
     fn eval_rest(&mut self, args: &mut Iter<Inner>) -> Result<Sexp, String> {
         let mut res = Sexp::nil();
 
@@ -273,14 +363,15 @@ impl Lsp {
         Ok(res)
     }
 
+    #[inline]
     fn eval_fn(&mut self, s: &str, args: &mut Iter<Inner>) -> Result<Inner, String> {
         if let Some(fun) = self.globals.funcs.get(s).cloned() {
             match fun.eval_args() {
                 EvalOption::Evaluated => {
                     let ev_args = self.eval_rest(args)?;
-                    fun.call(&mut ev_args.iter())
+                    fun.call(self, &mut ev_args.iter())
                 },
-                EvalOption::Unevaluated => fun.call(args),
+                EvalOption::Unevaluated => fun.call(self, args),
             }
         } else {
             Err(format!("Unrecognised function: {:?}", s))
