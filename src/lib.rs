@@ -358,6 +358,7 @@ impl Lsp {
                 let mut itr = toks.iter().peekable();
                 //AST root
                 let mut tree = Sexp::root();
+                let mut quot = false;
 
                 {
                     let mut anc = vec![&mut tree];
@@ -369,7 +370,11 @@ impl Lsp {
                             &Token::Lbr(c) => unsafe {
                                 let cur = cur as *mut Sexp;
                                 let nsxp = (&mut *cur).new_inner_sxp(c);
-                                anc.push(&mut *cur);
+                                if quot {
+                                    quot = false;
+                                } else {
+                                    anc.push(&mut *cur);
+                                }
                                 anc.push(nsxp);
                             },
                             &Token::Rbr(c) => {
@@ -377,6 +382,8 @@ impl Lsp {
                                     return Err(format!("There are more '{}' than '{}'", c, Lsp::inv_brk(c)));
                                 } else if cur.delim != Lsp::inv_brk(c) {
                                     return Err(format!("Mismatch '{}' with '{}'", cur.delim, c));
+                                } else if quot {
+                                    return Err(format!("Can't quote closing delimiter '{}'", c));
                                 }
                             },
                             &Token::Atm(ref s) => {
@@ -385,13 +392,30 @@ impl Lsp {
                                 } else {
                                     cur.push(Inner::Sym(s.to_owned()));
                                 }
-                                anc.push(cur);
+                                if quot {
+                                    quot = false;
+                                } else {
+                                    anc.push(cur);
+                                }
                             },
                             &Token::Str(ref s) => {
                                 cur.push(Inner::Str(s.to_owned()));
-                                anc.push(cur);
+                                if quot {
+                                    quot = false;
+                                } else {
+                                    anc.push(cur);
+                                }
                             },
-                            &Token::Qot => return Err(format!("Quotes not implemented")),
+                            &Token::Qot => unsafe {
+                                let cur = cur as *mut Sexp;
+                                let mut nsxp = (&mut *cur).new_inner_sxp('(');
+                                nsxp.push(Inner::Sym("quote".to_owned()));
+                                if !quot {
+                                    anc.push(&mut *cur);
+                                }
+                                anc.push(nsxp);
+                                quot = true;
+                            },
                             &Token::Spc => panic!("Space token not supported"),
                         }
                     }

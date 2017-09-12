@@ -102,13 +102,7 @@ pub trait Tokenizer {
                 '(' | '{' | '[' => Ok(Token::Lbr(c)),
                 ')' | '}' | ']' => Ok(Token::Rbr(c)),
                 '"' => self.tok_str('"', &mut itr),
-                '\'' => {
-                    if Some(&'(') == itr.peek() {
-                        Ok(Token::Qot)
-                    } else {
-                        self.tok_str('\'', &mut itr)
-                    }
-                },
+                '\'' => Ok(Token::Qot),
                 _ => self.tok_atom(c, &mut itr)
             };
             match res {
