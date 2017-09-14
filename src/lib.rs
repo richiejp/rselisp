@@ -16,6 +16,7 @@
 use std::slice::Iter;
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::cell::RefCell;
 use std::fmt;
 
 mod tokenizer;
@@ -27,8 +28,11 @@ pub enum Inner {
     Str(String),
     Sym(String),
     Sxp(Sexp),
-    Lambda(Box<UserFunc>),
+    Lambda(UserFunc),
+    Ref(InnerRef),
 }
+
+type InnerRef = Rc<RefCell<Inner>>;
 
 impl Inner {
     fn ref_sxp(&mut self) -> &mut Sexp {
@@ -37,6 +41,10 @@ impl Inner {
         } else {
             panic!("Not an Sexp");
         }
+    }
+
+    fn into_ref(self) -> InnerRef {
+        Rc::new(RefCell::new(self))
     }
 }
 
@@ -48,6 +56,7 @@ impl fmt::Display for Inner {
             &Inner::Sym(ref s) => write!(f, "{}", s),
             &Inner::Sxp(ref sxp) => write!(f, "{}", sxp),
             &Inner::Lambda(ref fun) => write!(f, "{}", fun),
+            &Inner::Ref(ref iref) => write!(f, "{}", &iref.borrow()),
         }
     }
 }
@@ -82,10 +91,6 @@ impl Sexp {
 
     fn push(&mut self, child: Inner) {
         self.lst.push(child);
-    }
-
-    fn iter(&self) -> Iter<Inner> {
-        self.lst.iter()
     }
 
     fn new_inner_sxp(&mut self, delim: char) -> &mut Sexp {
@@ -131,6 +136,14 @@ pub struct ArgSpec {
     name: String,
 }
 
+impl ArgSpec {
+    fn new(name: String) -> ArgSpec {
+        ArgSpec {
+            name: name,
+        }
+    }
+}
+
 impl fmt::Display for ArgSpec {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", &self.name)
@@ -158,11 +171,11 @@ fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 pub struct UserFunc {
     name: String,
     args: ArgSpecs,
-    body: Inner,
+    body: InnerRef,
 }
 
 impl UserFunc {
-    fn new(name: String, args: Vec<ArgSpec>, body: Inner) -> UserFunc {
+    fn new(name: String, args: Vec<ArgSpec>, body: InnerRef) -> UserFunc {
         UserFunc {
             name: name,
             args: ArgSpecs(args),
@@ -176,22 +189,24 @@ impl Func for UserFunc {
     fn name(&self) -> &str { &self.name }
 
     fn call(&self, lsp: &mut Lsp, args: &mut Iter<Inner>) -> Result<Inner, String> {
-        lsp.eval_inner(&self.body)
-    }
-}
-
-impl Func for Box<UserFunc> {
-    fn eval_args(&self) -> EvalOption { EvalOption::Evaluated }
-    fn name(&self) -> &str { &self.name }
-
-    fn call(&self, lsp: &mut Lsp, args: &mut Iter<Inner>) -> Result<Inner, String> {
-        lsp.eval_inner(&self.body)
+        let mut ns = Namespace::new();
+        for spec in self.args.iter() {
+            if let Some(arg) = args.next() {
+                ns.reg_var(spec.name.clone(), arg);
+            } else {
+                return Err(format!("'{}' expected '{}' argument", self.name(), spec.name));
+            }
+        }
+        lsp.locals.push(ns);
+        let ret = lsp.eval_ref(&self.body);
+        lsp.locals.pop();
+        ret
     }
 }
 
 impl fmt::Display for UserFunc {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "('{} . (lambda {} {}))", &self.name, &self.args, &self.body)
+        write!(f, "('{} . (lambda {} {}))", &self.name, &self.args, Inner::Ref(self.body.clone()))
     }
 }
 
@@ -267,10 +282,22 @@ def_builtin! { "quote", QuoteBuiltin, Unevaluated, _lsp, args; {
 
 def_builtin! { "lambda", LambdaBuiltin, Unevaluated, _lsp, args; {
     match (args.next(), args.next()) {
-        (Some(&Inner::Sxp(_)), Some(body)) => {
-            Ok(Inner::Lambda(Box::new(
-                UserFunc::new("".to_owned(), Vec::new(), body.clone())
-            )))
+        (Some(&Inner::Sxp(ref args_sxp)), Some(body)) => {
+            let largs: Result<Vec<ArgSpec>, String> = args_sxp.lst.iter().map(
+                |arg| -> Result<ArgSpec, String> {
+                    match arg {
+                        &Inner::Sym(ref name) => Ok(ArgSpec::new(name.to_owned())),
+                        _ => Err(format!("Lambda arguments must be symbols")),
+                    }
+                }
+            ).collect();
+
+            Ok(Inner::Lambda(
+                UserFunc::new("".to_owned(), largs?, match body {
+                    &Inner::Ref(ref iref) => iref.clone(),
+                    _ => body.clone().into_ref(),
+                })
+            ))
         },
         _ => Err(format!("(lambda ([args]) [body])")),
     }
@@ -305,7 +332,7 @@ def_builtin! { "exit", ExitBuiltin, Unevaluated, _lsp, _args; {
 
 struct Namespace {
     funcs: HashMap<String, Rc<Func>>,
-    vars: HashMap<String, Rc<Inner>>,
+    vars: HashMap<String, Inner>,
 }
 
 impl Namespace {
@@ -320,13 +347,17 @@ impl Namespace {
         self.funcs.insert(fun.name().to_owned(), Rc::new(fun));
     }
 
-    fn reg_var(&mut self, name: String, var: Inner) {
-        self.vars.insert(name, Rc::new(var));
+    fn reg_var(&mut self, name: String, var: &Inner) {
+        self.vars.insert(name, match var {
+            &Inner::Sxp(_) => Inner::Ref(var.clone().into_ref()),
+            _ => var.clone(),
+        });
     }
 }
 
 pub struct Lsp {
     globals: Namespace,
+    locals: Vec<Namespace>,
 }
 
 impl Tokenizer for Lsp { }
@@ -343,11 +374,12 @@ impl Lsp {
         g.reg_fn(PrintBuiltin { });
         g.reg_fn(ExitBuiltin { });
 
-        g.reg_var("t".to_owned(), Inner::Sym("t".to_owned()));
-        g.reg_var("nil".to_owned(), Inner::Sxp(Sexp::nil()));
+        g.reg_var("t".to_owned(), &Inner::Sym("t".to_owned()));
+        g.reg_var("nil".to_owned(), &Inner::Sxp(Sexp::nil()));
         
         Lsp {
             globals: g,
+            locals: Vec::new(),
         }
     }
     
@@ -408,7 +440,7 @@ impl Lsp {
                             },
                             &Token::Qot => unsafe {
                                 let cur = cur as *mut Sexp;
-                                let mut nsxp = (&mut *cur).new_inner_sxp('(');
+                                let nsxp = (&mut *cur).new_inner_sxp('(');
                                 nsxp.push(Inner::Sym("quote".to_owned()));
                                 if !quot {
                                     anc.push(&mut *cur);
@@ -428,11 +460,22 @@ impl Lsp {
 
     #[inline]
     fn eval_sym(&self, sym: &str) -> Result<Inner, String> {
-        if let Some(val) = self.globals.vars.get(sym) {
-            Ok(Inner::clone(val))
+        for ns in self.locals.iter().rev() {
+            if let Some(var) = ns.vars.get(sym) {
+                return Ok(Inner::clone(var));
+            }
+        }
+
+        if let Some(var) = self.globals.vars.get(sym) {
+            Ok(Inner::clone(var))
         } else {
             Err(format!("No variable named {}", sym))
         }
+    }
+
+    #[inline]
+    fn eval_ref(&mut self, iref: &InnerRef) -> Result<Inner, String> {
+        self.eval_inner(&iref.borrow())
     }
 
     #[inline]
@@ -440,19 +483,14 @@ impl Lsp {
         match ast {
             &Inner::Sym(ref s) => self.eval_sym(s),
             &Inner::Sxp(ref sxp) => self.eval(sxp),
+            &Inner::Ref(ref iref) => self.eval_ref(iref),
             _ => Ok(ast.clone()),
         }
     }
 
     #[inline]
-    fn eval_rest(&mut self, args: &mut Iter<Inner>) -> Result<Sexp, String> {
-        let mut res = Sexp::nil();
-
-        while let Some(arg) = args.next() {
-            res.push(self.eval_inner(arg)?);
-        }
-
-        Ok(res)
+    fn eval_rest(&mut self, args: &mut Iter<Inner>) -> Result<Vec<Inner>, String> {
+        args.map( |arg| self.eval_inner(arg) ).collect()
     }
 
     #[inline]
