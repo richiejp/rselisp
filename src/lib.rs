@@ -68,10 +68,10 @@ pub struct Sexp {
 }
 
 impl Sexp {
-    fn root() -> Sexp {
+    pub fn root(func: String) -> Sexp {
         Sexp {
             delim: 'R',
-            lst: Vec::new(),
+            lst: vec![Inner::Sym(func)],
         }
     }
 
@@ -392,13 +392,13 @@ impl Lsp {
         }
     }
     
-    pub fn read(&self, input: &String) -> Result<Sexp, String> {
+    pub fn read(&self, root: Sexp, input: &String) -> Result<Sexp, String> {
         match self.tokenize(input) {
             Ok(toks) => {
                 //Iterator
                 let mut itr = toks.iter().peekable();
                 //AST root
-                let mut tree = Sexp::root();
+                let mut tree = root;
                 let mut quot = false;
 
                 {

@@ -17,9 +17,10 @@ use std::io::stdin;
 
 extern crate rselisp;
 
-use rselisp::{Lsp, Inner};
+use rselisp::{Lsp, Inner, Sexp};
 
 fn main() {
+    let repl_root = Sexp::root("progn".to_owned());
     let mut lsp = Lsp::new();
     
     println!("'(rselisp repl v0.0 (C) 2017 Richard Palethorpe)");
@@ -28,10 +29,10 @@ fn main() {
         let mut line = String::new();
         match stdin().read_line(&mut line) {
             Ok(_) => {
-                match lsp.read(&line) {
+                match lsp.read(repl_root.clone(), &line) {
                     Ok(sexp) => match lsp.eval(&sexp) {
                         Ok(Inner::Sym(ref s)) if s == "exit" => break,
-                        Ok(resexp) => println!("-> {:?}", resexp),
+                        Ok(resexp) => println!("-> {}", resexp),
                         Err(e) => println!("EVAL ERROR: {}", e),
                     },
                     Err(e) => println!("READ ERROR: {}", e),
