@@ -330,6 +330,14 @@ def_builtin! { "exit", ExitBuiltin, Unevaluated, _lsp, _args; {
     Ok(Inner::Sym("exit".to_owned()))
 }}
 
+def_builtin! { "progn", PrognBuiltin, Evaluated, _lsp, args; {
+    if let Some(val) = args.last() {
+        Ok(val.clone())
+    } else {
+        Err(format!("progn requires one or more arguments"))
+    }
+}}
+
 struct Namespace {
     funcs: HashMap<String, Rc<Func>>,
     vars: HashMap<String, Inner>,
@@ -373,6 +381,7 @@ impl Lsp {
         g.reg_fn(DefaliasBuiltin { });
         g.reg_fn(PrintBuiltin { });
         g.reg_fn(ExitBuiltin { });
+        g.reg_fn(PrognBuiltin { });
 
         g.reg_var("t".to_owned(), &Inner::Sym("t".to_owned()));
         g.reg_var("nil".to_owned(), &Inner::Sxp(Sexp::nil()));
