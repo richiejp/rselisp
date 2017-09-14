@@ -46,6 +46,37 @@ impl Inner {
     fn into_ref(self) -> InnerRef {
         Rc::new(RefCell::new(self))
     }
+
+    fn nil() -> Inner {
+        Inner::Sxp(Sexp::nil())
+    }
+
+    fn t() -> Inner {
+        Inner::Sym("t".to_owned())
+    }
+
+    fn is_nil(&self) -> bool {
+        match self {
+            &Inner::Sym(ref s) if s == "nil" => true,
+            &Inner::Sxp(ref sxp) if sxp.lst.len() == 0 => true,
+            _ => false,
+        }
+    }
+}
+
+impl std::cmp::PartialEq for Inner {
+    fn eq(&self, other: &Inner) -> bool {
+        match self {
+            &Inner::Int(i) => {
+                if let &Inner::Int(oi) = other {
+                    i == oi
+                } else {
+                    false
+                }
+            },
+            _ => panic!("Only equality of Inner::Int implemented"),
+        }
+    }
 }
 
 impl fmt::Display for Inner {
@@ -338,6 +369,45 @@ def_builtin! { "progn", PrognBuiltin, Evaluated, _lsp, args; {
     }
 }}
 
+def_builtin! { "if", IfBuiltin, Unevaluated, lsp, args; {
+    if let Some(cond) = args.next() {
+        let then = match args.next() {
+            Some(then) => then,
+            None => return Err(format!("if requires a THEN argument")),
+        };
+
+        if !lsp.eval_inner(cond)?.is_nil() {
+                lsp.eval_inner(then)
+        } else {
+            let mut ret = if let Some(lelse) = args.next() {
+                lsp.eval_inner(lelse)?
+            } else {
+                Inner::nil()
+            };
+
+            while let Some(lelse) = args.next() {
+                ret = lsp.eval_inner(lelse)?;
+            }
+
+            Ok(ret)
+        }
+    } else {
+        Err(format!("if requires a COND argument"))
+    }
+}}
+
+def_builtin! { "eq", EqBuiltin, Evaluated, _lsp, args; {
+    if let (Some(left), Some(right)) = (args.next(), args.next()) {
+        if left == right {
+            Ok(Inner::t())
+        } else {
+            Ok(Inner::nil())
+        }
+    } else {
+        Err(format!("eq requires two arguments"))
+    }
+}}
+
 struct Namespace {
     funcs: HashMap<String, Rc<Func>>,
     vars: HashMap<String, Inner>,
@@ -382,9 +452,11 @@ impl Lsp {
         g.reg_fn(PrintBuiltin { });
         g.reg_fn(ExitBuiltin { });
         g.reg_fn(PrognBuiltin { });
+        g.reg_fn(IfBuiltin { });
+        g.reg_fn(EqBuiltin { });
 
-        g.reg_var("t".to_owned(), &Inner::Sym("t".to_owned()));
-        g.reg_var("nil".to_owned(), &Inner::Sxp(Sexp::nil()));
+        g.reg_var("t".to_owned(), &Inner::t());
+        g.reg_var("nil".to_owned(), &Inner::nil());
         
         Lsp {
             globals: g,
