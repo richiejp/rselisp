@@ -18,8 +18,10 @@ use std::io::stdin;
 extern crate rselisp;
 
 use rselisp::{Lsp, Inner, Sexp};
+use std::fs::File;
+use std::io::prelude::*;
 
-fn main() {
+fn repl() {
     let repl_root = Sexp::root("progn".to_owned());
     let mut lsp = Lsp::new();
     
@@ -43,4 +45,39 @@ fn main() {
     }
 
     println!("'(Good bye!)");
+}
+
+fn exec_file(name: &str) {
+    let mut src = String::new();
+    let src_root = Sexp::root("progn".to_owned());
+    let mut lsp = Lsp::new();
+
+    match File::open(name) {
+        Ok(mut file) => {
+            if let Err(e) = file.read_to_string(&mut src) {
+                println!("I/O ERROR: {}", e);
+                return;
+            }
+        },
+        Err(e) => {
+            println!("FILE ERROR: {}", e);
+            return;
+        },
+    }
+
+    match lsp.read(src_root.clone(), &src) {
+        Ok(sexp) => if let Err(e) = lsp.eval(&sexp) {
+            println!("EVAL ERROR: {}", e)
+        },
+        Err(e) => println!("READ ERROR: {}", e),
+    };
+}
+
+fn main() {
+    let mut args = std::env::args();
+    if let (Some(_exe_name), Some(file)) = (args.next(), args.next()) {
+        exec_file(&file);
+    } else {
+        repl();
+    }
 }
