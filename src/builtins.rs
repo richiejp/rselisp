@@ -213,3 +213,14 @@ def_builtin! { "cdr", CdrBuiltin, Evaluated, _lsp, args; {
         Err(format!("cdr requires one argument"))
     }
 }}
+
+def_builtin! { "listp", ListpBuiltin, Evaluated, _lsp, args; {
+    if let Some(lst) = args.next() {
+        match lst {
+            &Inner::Sxp(_) => Ok(Inner::t()),
+            _ => Ok(Inner::nil()),
+        }
+    } else {
+        Err(format!("listp requires one argument"))
+    }
+}}

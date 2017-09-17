@@ -317,6 +317,7 @@ impl Lsp {
         g.reg_fn(ConsBuiltin { });
         g.reg_fn(CarBuiltin { });
         g.reg_fn(CdrBuiltin { });
+        g.reg_fn(ListpBuiltin { });
 
         g.reg_var("t".to_owned(), &Inner::t());
         g.reg_var("nil".to_owned(), &Inner::nil());
