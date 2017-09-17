@@ -438,15 +438,22 @@ impl Lsp {
     }
 
     #[inline]
+    fn apply(&mut self, fun: &Func, args: &mut Iter<Inner>) -> Result<Inner, String> {
+        match fun.eval_args() {
+            EvalOption::Evaluated => {
+                let ev_args = self.eval_rest(args)?;
+                fun.call(self, &mut ev_args.iter())
+            },
+            EvalOption::Unevaluated => fun.call(self, args),
+        }
+    }
+
+    #[inline]
     fn eval_fn(&mut self, s: &str, args: &mut Iter<Inner>) -> Result<Inner, String> {
+        use std::borrow::Borrow;
+
         if let Some(fun) = self.globals.funcs.get(s).cloned() {
-            match fun.eval_args() {
-                EvalOption::Evaluated => {
-                    let ev_args = self.eval_rest(args)?;
-                    fun.call(self, &mut ev_args.iter())
-                },
-                EvalOption::Unevaluated => fun.call(self, args),
-            }
+            self.apply(Rc::borrow(&fun), args)
         } else {
             Err(format!("Unrecognised function: {:?}", s))
         }
@@ -456,10 +463,13 @@ impl Lsp {
         let mut itr = ast.lst.iter();
 
         if let Some(first) = itr.next() {
-            if let &Inner::Sym(ref s) = first {
-                return self.eval_fn(s, &mut itr);
-            } else {
-                return Err(format!("Invalid as a function: {:?}", first));
+            match first {
+                &Inner::Sym(ref s) => self.eval_fn(s, &mut itr),
+                &Inner::Sxp(ref x) => match self.eval(x)? {
+                    Inner::Lambda(ref fun) => self.apply(fun, &mut itr),
+                    sxp => Err(format!("Invalid as a function: {:?}", sxp)),
+                },
+                _ => Err(format!("Invalid as a function: {:?}", first)),
             }
         } else {
             Ok(Inner::Sxp(Sexp::nil()))
