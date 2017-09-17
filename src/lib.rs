@@ -464,13 +464,13 @@ impl Lsp {
         }
     }
     
-    pub fn read(&self, root: Sexp, input: &String) -> Result<Sexp, String> {
+    pub fn read(&self, input: &String) -> Result<Sexp, String> {
         match self.tokenize(input) {
             Ok(toks) => {
                 //Iterator
                 let mut itr = toks.iter().peekable();
                 //AST root
-                let mut tree = root;
+                let mut tree = Sexp::root("progn".to_owned());
                 let mut quot = false;
 
                 {

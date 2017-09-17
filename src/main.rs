@@ -17,12 +17,11 @@ use std::io::stdin;
 
 extern crate rselisp;
 
-use rselisp::{Lsp, Inner, Sexp};
+use rselisp::{Lsp, Inner};
 use std::fs::File;
 use std::io::prelude::*;
 
 fn repl() {
-    let repl_root = Sexp::root("progn".to_owned());
     let mut lsp = Lsp::new();
     
     println!("'(rselisp repl v0.0 (C) 2017 Richard Palethorpe)");
@@ -31,7 +30,7 @@ fn repl() {
         let mut line = String::new();
         match stdin().read_line(&mut line) {
             Ok(_) => {
-                match lsp.read(repl_root.clone(), &line) {
+                match lsp.read(&line) {
                     Ok(sexp) => match lsp.eval(&sexp) {
                         Ok(Inner::Sym(ref s)) if s == "exit" => break,
                         Ok(resexp) => println!("-> {}", resexp),
@@ -49,7 +48,6 @@ fn repl() {
 
 fn exec_file(name: &str) {
     let mut src = String::new();
-    let src_root = Sexp::root("progn".to_owned());
     let mut lsp = Lsp::new();
 
     match File::open(name) {
@@ -65,7 +63,7 @@ fn exec_file(name: &str) {
         },
     }
 
-    match lsp.read(src_root.clone(), &src) {
+    match lsp.read(&src) {
         Ok(sexp) => if let Err(e) = lsp.eval(&sexp) {
             println!("EVAL ERROR: {}", e)
         },
