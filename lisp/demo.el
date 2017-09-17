@@ -19,4 +19,4 @@
 
 (hello-world)
 (print "fibs: ")
-(fibs 10)
+(fibs 20)
