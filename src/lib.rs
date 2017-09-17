@@ -13,11 +13,15 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+extern crate fnv;
+
 use std::slice::Iter;
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::cell::RefCell;
 use std::fmt;
+
+use fnv::FnvHashMap;
 
 mod tokenizer;
 use tokenizer::*;
@@ -409,15 +413,15 @@ def_builtin! { "eq", EqBuiltin, Evaluated, _lsp, args; {
 }}
 
 struct Namespace {
-    funcs: HashMap<String, Rc<Func>>,
-    vars: HashMap<String, Inner>,
+    funcs: FnvHashMap<String, Rc<Func>>,
+    vars: FnvHashMap<String, Inner>,
 }
 
 impl Namespace {
     fn new() -> Namespace {
         Namespace {
-            funcs: HashMap::new(),
-            vars: HashMap::new(),
+            funcs: FnvHashMap::default(),
+            vars: FnvHashMap::default(),
         }
     }
 

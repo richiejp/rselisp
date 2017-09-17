@@ -4,3 +4,12 @@ version = "0.1.0"
 authors = ["Richard Palethorpe <richiejp@f-m.fm>"]
 
 [dependencies]
+fnv = "*"
+
+[profile.bench]
+opt-level = 3
+debug = 2
+
+[[bench]]
+name = "perf"
+path = "tests/perf.rs"
