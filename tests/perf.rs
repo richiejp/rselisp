@@ -34,14 +34,13 @@ fn cons(b: &mut Bencher) {
 	a
       (cons a (repeat a (- c 1))))))
 
-(defalias 'prn-lst
+(defalias 'add1
   (lambda (l)
-    (if (listp l) (progn
-		    (print (car l))
-		    (prn-lst (cdr l)))
-      (print l))))
+    (if (listp l)
+	(cons (+ 1 (car l)) (add1 (cdr l)))
+      l)))
 
-(prn-lst (repeat 'a 100))
+(add1 (repeat 1 100))
 "#.to_owned();
     let ast = lsp.read(&src).unwrap();
 
