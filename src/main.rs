@@ -14,12 +14,14 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 use std::io::stdin;
-
-extern crate rselisp;
-
-use rselisp::{Lsp, Inner};
 use std::fs::File;
 use std::io::prelude::*;
+
+extern crate rselisp;
+use rselisp::{Lsp, Inner};
+
+mod editor;
+use editor::Buffer;
 
 fn repl() {
     let mut lsp = Lsp::new();
