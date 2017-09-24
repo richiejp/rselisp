@@ -17,15 +17,23 @@ use std::io::stdin;
 use std::fs::File;
 use std::io::prelude::*;
 
+extern crate orbclient;
+
 extern crate rselisp;
 use rselisp::{Lsp, Inner};
 
 mod editor;
-use editor::Buffer;
+use editor::{Buffer, Frame, OrbFrame};
+
+enum Mode {
+    Repl,
+    Editor,
+    ExecFile,
+}
 
 fn repl() {
     let mut lsp = Lsp::new();
-    
+
     println!("'(rselisp repl v0.0 (C) 2017 Richard Palethorpe)");
 
     loop {
@@ -73,11 +81,37 @@ fn exec_file(name: &str) {
     };
 }
 
+fn editor() {
+    OrbFrame::new().show();
+}
+
 fn main() {
-    let mut args = std::env::args();
-    if let (Some(_exe_name), Some(file)) = (args.next(), args.next()) {
-        exec_file(&file);
-    } else {
-        repl();
+    let mut mode = Mode::Repl;
+    let mut start_file: Option<String> = None;
+    let mut args = std::env::args().skip(1);
+
+    while let Some(arg) = args.next() {
+        match arg.as_ref() {
+            "--editor" => mode = Mode::Editor,
+            "--exec" => mode = Mode::ExecFile,
+            file => {
+                start_file = Some(file.to_owned());
+                if let Mode::Repl = mode {
+                    mode = Mode::ExecFile;
+                }
+            },
+        }
+    }
+
+    match mode {
+        Mode::Editor => editor(),
+        Mode::ExecFile => {
+            if let Some(ref file) = start_file {
+                exec_file(file);
+            } else {
+                println!("Argument --exec requires a file path");
+            }
+        },
+        Mode::Repl => repl(),
     }
 }

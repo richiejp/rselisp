@@ -5,6 +5,7 @@ authors = ["Richard Palethorpe <richiejp@f-m.fm>"]
 
 [dependencies]
 fnv = "*"
+orbclient = "*"
 
 [profile.bench]
 opt-level = 3

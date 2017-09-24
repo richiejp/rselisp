@@ -4,6 +4,8 @@ use std::ptr;
 use std::str;
 use std::iter;
 
+use orbclient as orb;
+
 /// Contains a textual document
 ///
 /// This is supposed to mirror what emacs calls a buffer. Currently we are
@@ -123,12 +125,45 @@ impl Buffer {
 }
 
 pub struct Window {
+    cur_buffer: Rc<Buffer>,
 }
 
 pub trait Frame {
+    fn show(&mut self);
 }
 
 pub struct OrbFrame {
+    win: Option<orb::Window>,
+}
+
+impl OrbFrame {
+    pub fn new() -> OrbFrame {
+        OrbFrame {
+            win: None,
+        }
+    }
+}
+
+impl Frame for OrbFrame {
+    fn show(&mut self) {
+        use orbclient::{Window, Renderer, EventOption};
+
+        let (width, height) = orb::get_display_size().unwrap();
+        self.win = Some(Window::new(width as i32 / 4, height as i32 / 4,
+                                    700, 500,
+                                    &"rselisp").unwrap());
+        let win = self.win.as_mut().unwrap();
+        win.sync();
+
+        'events: loop {
+            for event in win.events() {
+                match event.to_option() {
+                    orb::EventOption::Quit(_quit_event) => break 'events,
+                    event_option => println!("{:?}", event_option)
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
