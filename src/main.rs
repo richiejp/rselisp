@@ -16,6 +16,8 @@
 use std::io::stdin;
 use std::fs::File;
 use std::io::prelude::*;
+use std::sync::mpsc::{channel, Sender, Receiver};
+use std::thread;
 
 extern crate orbclient;
 
@@ -23,7 +25,7 @@ extern crate rselisp;
 use rselisp::{Lsp, Inner};
 
 mod editor;
-use editor::{Buffer, Frame, OrbFrame};
+use editor::{Buffer, Frame, OrbFrame, FrameCmd, UserEvent};
 
 enum Mode {
     Repl,
@@ -82,7 +84,24 @@ fn exec_file(name: &str) {
 }
 
 fn editor() {
-    OrbFrame::new().show();
+    let (frm_cmd_send, frm_cmd_recv) = channel::<FrameCmd>();
+    let (frm_evt_send, frm_evt_recv) = channel::<UserEvent>();
+    let thrd = thread::spawn( move || {
+        let mut frame = OrbFrame::new(frm_evt_send, frm_cmd_recv);
+        frame.start();
+    });
+
+    frm_cmd_send.send(FrameCmd::Show).unwrap();
+
+    while let Ok(evt) = frm_evt_recv.recv() {
+        match evt {
+            UserEvent::Quit => {
+                frm_cmd_send.send(FrameCmd::Quit);
+                break;
+            },
+            UserEvent::KeyEvent(k) => println!("Key press {}", k),
+        }
+    }
 }
 
 fn main() {

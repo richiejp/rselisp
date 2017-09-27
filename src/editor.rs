@@ -3,8 +3,10 @@ use std::io::prelude::*;
 use std::ptr;
 use std::str;
 use std::iter;
-
-use orbclient as orb;
+use std::thread;
+use std::sync::mpsc::{Sender, Receiver, TryRecvError};
+use orbclient;
+use orbclient::{Window, Renderer, EventOption, WindowFlag};
 
 /// Contains a textual document
 ///
@@ -124,43 +126,114 @@ impl Buffer {
     }
 }
 
-pub struct Window {
-    cur_buffer: Rc<Buffer>,
+#[derive(Debug)]
+pub enum FrameCmd {
+    Show,
+    Update(String),
+    Quit,
+}
+
+#[derive(Debug)]
+pub enum UserEvent {
+    KeyEvent(char),
+    Quit,
 }
 
 pub trait Frame {
-    fn show(&mut self);
+    fn start(&mut self);
 }
 
 pub struct OrbFrame {
-    win: Option<orb::Window>,
+    recv: Receiver<FrameCmd>,
+    send: Sender<UserEvent>,
+    win: Option<Window>,
+}
+
+enum ComResult {
+    Ok(u32),
+    Quit,
 }
 
 impl OrbFrame {
-    pub fn new() -> OrbFrame {
+    pub fn new(send: Sender<UserEvent>, recv: Receiver<FrameCmd>) -> OrbFrame {
         OrbFrame {
+            recv: recv,
+            send: send,
             win: None,
         }
+    }
+
+    fn recv(&mut self) -> ComResult {
+        let mut cnt = 0;
+
+        loop {
+            let res = self.recv.try_recv();
+            match res {
+                Ok(cmd) => {
+                    cnt += 1;
+                    match cmd {
+                        FrameCmd::Show => self.show(),
+                        FrameCmd::Quit => return ComResult::Quit,
+                        cmd => println!("OrbFrame recv {:?}", cmd),
+                    }
+                },
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => {
+                    println!("OrbFrame is orphaned!");
+                    return ComResult::Quit;
+                },
+            };
+        }
+
+        ComResult::Ok(cnt)
+    }
+
+    fn show(&mut self) {
+        let (width, height) = orbclient::get_display_size().unwrap();
+        self.win = Some(Window::new_flags(width as i32 / 4, height as i32 / 4,
+                                          700, 500,
+                                          &"rselisp",
+                                          &[WindowFlag::Async]).unwrap());
+        self.win.as_mut().unwrap().sync();
+    }
+
+    fn react(&mut self) -> ComResult {
+        let mut cnt = 0;
+
+        if let Some(ref mut win) = self.win {
+            for event in win.events() {
+                cnt += 1;
+                match event.to_option() {
+                    EventOption::Quit(_quit_event) => {
+                        if let Err(_) = self.send.send(UserEvent::Quit) {
+                            return ComResult::Quit;
+                        }
+                    },
+                    event_option => println!("{:?}", event_option)
+                }
+            }
+        }
+
+        ComResult::Ok(cnt)
     }
 }
 
 impl Frame for OrbFrame {
-    fn show(&mut self) {
-        use orbclient::{Window, Renderer, EventOption};
+    fn start(&mut self) {
+        loop {
+            let mut cnt = 0;
 
-        let (width, height) = orb::get_display_size().unwrap();
-        self.win = Some(Window::new(width as i32 / 4, height as i32 / 4,
-                                    700, 500,
-                                    &"rselisp").unwrap());
-        let win = self.win.as_mut().unwrap();
-        win.sync();
+            match self.recv() {
+                ComResult::Ok(recvd) => cnt += recvd,
+                ComResult::Quit => break,
+            }
+            match self.react() {
+                ComResult::Ok(evnts) => cnt += evnts,
+                ComResult::Quit => break,
+            }
 
-        'events: loop {
-            for event in win.events() {
-                match event.to_option() {
-                    orb::EventOption::Quit(_quit_event) => break 'events,
-                    event_option => println!("{:?}", event_option)
-                }
+            if cnt < 1 {
+                thread::yield_now();
             }
         }
     }
