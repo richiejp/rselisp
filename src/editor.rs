@@ -125,6 +125,10 @@ impl Buffer {
             .take(self.gap_indx)
             .chain(self.gap_buf.chars().skip(self.gap_indx + self.gap_len))
     }
+
+    pub fn mode_line(&self) -> String {
+        " U:**-  *scratch*\tAll (0,0)\t(Fake mode line)".to_owned()
+    }
 }
 
 #[derive(Debug)]
@@ -169,22 +173,39 @@ impl OrbFrame {
         }
     }
 
+    fn draw_str(win: &mut Window, x: i32, y: i32, txt: &str, colour: Color) {
+        let mut line = 0;
+        let mut col = 0;
+
+        for chr in txt.chars() {
+            if chr == '\n' {
+                line += 1;
+                col = 0;
+            }
+            win.char(x + 8 * col, y + 16 * line, chr, colour);
+            col += 1;
+        }
+    }
+
+    fn draw_text_box(win: &mut Window, x: u32, y: u32, w: u32, h: u32, txt: &str,
+                     fg: Color, bg: Color) {
+        win.rect(x as i32, y as i32, w, h, bg);
+        OrbFrame::draw_str(win, x as i32, y as i32, txt, fg);
+    }
+
     fn update(&mut self, doc: String) {
         if let Some(ref mut win) = self.win {
-            let mut line = 0;
-            let mut col = 0;
             let (w, h) = (win.width(), win.height());
-            win.rect(0, 0, w, h, Color::rgb(0x2a, 0x2f, 0x38));
 
-            for chr in doc.chars() {
-                if chr == '\n' {
-                    line += 1;
-                    col = 0;
-                }
-                win.char(8 * col as i32, 16 * line, chr, Color::rgb(0xbd, 0xc3, 0xce));
-                col += 1;
-            }
-
+            OrbFrame::draw_text_box(win, 0, 0, w, h - 32, &doc,
+                                    Color::rgb(0xbd, 0xc3, 0xce),
+                                    Color::rgb(0x2a, 0x2f, 0x38));
+            OrbFrame::draw_text_box(win, 0, h - 32, w, 16, "MODE LINE",
+                                    Color::rgb(0xbd, 0xc3, 0xce),
+                                    Color::rgb(0x24, 0x2a, 0x34));
+            OrbFrame::draw_text_box(win, 0, h - 16, w, 16, "Echo echo ...",
+                                    Color::rgb(0xbd, 0xc3, 0xce),
+                                    Color::rgb(0x2a, 0x2f, 0x38));
             win.sync();
         }
     }
