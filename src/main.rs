@@ -16,7 +16,7 @@
 use std::io::stdin;
 use std::fs::File;
 use std::io::prelude::*;
-use std::sync::mpsc::{channel, Sender, Receiver};
+use std::sync::mpsc::channel;
 use std::thread;
 
 extern crate orbclient;
@@ -86,20 +86,29 @@ fn exec_file(name: &str) {
 fn editor() {
     let (frm_cmd_send, frm_cmd_recv) = channel::<FrameCmd>();
     let (frm_evt_send, frm_evt_recv) = channel::<UserEvent>();
-    let thrd = thread::spawn( move || {
+    let _thrd = thread::spawn( move || {
         let mut frame = OrbFrame::new(frm_evt_send, frm_cmd_recv);
         frame.start();
     });
+    let mut buf = Buffer::new();
+    let mut cbuf = String::with_capacity(4);
+    let mut cursor = 0;
 
     frm_cmd_send.send(FrameCmd::Show).unwrap();
 
     while let Ok(evt) = frm_evt_recv.recv() {
         match evt {
             UserEvent::Quit => {
-                frm_cmd_send.send(FrameCmd::Quit);
+                frm_cmd_send.send(FrameCmd::Quit).unwrap();
                 break;
             },
-            UserEvent::KeyEvent(k) => println!("Key press {}", k),
+            UserEvent::KeyEvent(k) => {
+                cbuf.push(k);
+                buf.insert(cursor, &cbuf);
+                cbuf.pop();
+                frm_cmd_send.send(FrameCmd::Update(buf.chars().collect())).unwrap();
+                cursor += 1;
+            }
         }
     }
 }

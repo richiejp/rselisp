@@ -4,9 +4,10 @@ use std::ptr;
 use std::str;
 use std::iter;
 use std::thread;
+use std::time;
 use std::sync::mpsc::{Sender, Receiver, TryRecvError};
 use orbclient;
-use orbclient::{Window, Renderer, EventOption, WindowFlag};
+use orbclient::{Window, Renderer, EventOption, WindowFlag, Color};
 
 /// Contains a textual document
 ///
@@ -139,6 +140,11 @@ pub enum UserEvent {
     Quit,
 }
 
+/// An OS window
+///
+/// Emacs has another object called a Window which exists inside
+/// Frames. Windows in Emacs are tiled across the frame; so Emacs is a tiling
+/// window manager.
 pub trait Frame {
     fn start(&mut self);
 }
@@ -163,6 +169,26 @@ impl OrbFrame {
         }
     }
 
+    fn update(&mut self, doc: String) {
+        if let Some(ref mut win) = self.win {
+            let mut line = 0;
+            let mut col = 0;
+            let (w, h) = (win.width(), win.height());
+            win.rect(0, 0, w, h, Color::rgb(0x2a, 0x2f, 0x38));
+
+            for chr in doc.chars() {
+                if chr == '\n' {
+                    line += 1;
+                    col = 0;
+                }
+                win.char(8 * col as i32, 16 * line, chr, Color::rgb(0xbd, 0xc3, 0xce));
+                col += 1;
+            }
+
+            win.sync();
+        }
+    }
+
     fn recv(&mut self) -> ComResult {
         let mut cnt = 0;
 
@@ -174,7 +200,7 @@ impl OrbFrame {
                     match cmd {
                         FrameCmd::Show => self.show(),
                         FrameCmd::Quit => return ComResult::Quit,
-                        cmd => println!("OrbFrame recv {:?}", cmd),
+                        FrameCmd::Update(doc) => self.update(doc),
                     }
                 },
                 Err(TryRecvError::Empty) => break,
@@ -194,21 +220,27 @@ impl OrbFrame {
                                           700, 500,
                                           &"rselisp",
                                           &[WindowFlag::Async]).unwrap());
-        self.win.as_mut().unwrap().sync();
+        self.update("".to_owned());
     }
 
+    /// React to user input events
     fn react(&mut self) -> ComResult {
         let mut cnt = 0;
+
+        macro_rules! send {
+            ($thing:expr) => {{
+                if let Err(_) = self.send.send($thing) {
+                    return ComResult::Quit;
+                }
+            }}
+        }
 
         if let Some(ref mut win) = self.win {
             for event in win.events() {
                 cnt += 1;
                 match event.to_option() {
-                    EventOption::Quit(_quit_event) => {
-                        if let Err(_) = self.send.send(UserEvent::Quit) {
-                            return ComResult::Quit;
-                        }
-                    },
+                    EventOption::Quit(_quit_event) => send!(UserEvent::Quit),
+                    EventOption::Key(key) if key.pressed => send!(UserEvent::KeyEvent(key.character)),
                     event_option => println!("{:?}", event_option)
                 }
             }
@@ -219,7 +251,17 @@ impl OrbFrame {
 }
 
 impl Frame for OrbFrame {
+    /// Run the main loop for the UI
+    ///
+    /// On Linux atleast; this appears to use up a lot of CPU time in the SDL
+    /// library polling for user input. Ideally, during quite periods, this
+    /// thread should sleep until woken by a signal from the main thread or
+    /// the display manager. This probably requires a change to Orbital, so
+    /// for now it just sleeps for a set period of time if no messages/events
+    /// were received.
     fn start(&mut self) {
+        let time = time::Duration::from_millis(30);
+
         loop {
             let mut cnt = 0;
 
@@ -233,6 +275,8 @@ impl Frame for OrbFrame {
             }
 
             if cnt < 1 {
+                thread::sleep(time);
+            } else {
                 thread::yield_now();
             }
         }
