@@ -43,6 +43,12 @@ The contents of a file can be executed by adding the file path on the command li
 $ cargo run lisp/demo.el
 ```
 
+You can start something resembling a text editor by doing
+
+```
+$ cargo run -- --editor
+```
+
 Benchmarks can be run with `cargo bench` and unit tests with `cargo test`. To
 see what functions are implemented check `src/builtins.rs`.
 
