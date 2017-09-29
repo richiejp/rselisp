@@ -25,7 +25,7 @@ extern crate rselisp;
 use rselisp::{Lsp, Inner};
 
 mod editor;
-use editor::{Buffer, Frame, OrbFrame, FrameCmd, UserEvent};
+use editor::{Buffer, Frame, OrbFrame, FrameCmd, Event, UserEvent, BasicEvent};
 
 enum Mode {
     Repl,
@@ -102,12 +102,17 @@ fn editor() {
                 frm_cmd_send.send(FrameCmd::Quit).unwrap();
                 break;
             },
-            UserEvent::KeyEvent(k) => {
-                cbuf.push(k);
-                buf.insert(cursor, &cbuf);
-                cbuf.pop();
-                frm_cmd_send.send(FrameCmd::Update(buf.chars().collect())).unwrap();
-                cursor += 1;
+            UserEvent::KeyEvent(kevt) => {
+                match kevt {
+                    Event { basic: BasicEvent::Char(c), modifiers: _ } => {
+                        cbuf.push(c);
+                        buf.insert(cursor, &cbuf);
+                        cbuf.pop();
+                        frm_cmd_send.send(FrameCmd::Update(buf.chars().collect())).unwrap();
+                        cursor += 1;
+                    },
+                    bevt => println!("Unhandled {:?}", bevt),
+                }
             }
         }
     }

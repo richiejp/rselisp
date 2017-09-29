@@ -140,8 +140,14 @@ pub enum FrameCmd {
 
 #[derive(Debug)]
 pub enum UserEvent {
-    KeyEvent(char),
+    KeyEvent(Event),
     Quit,
+}
+
+impl UserEvent {
+    fn new_keyevent(basic: BasicEvent, mods: EventModifiers) -> UserEvent {
+        UserEvent::KeyEvent(Event::new(basic, mods))
+    }
 }
 
 /// An OS window
@@ -153,14 +159,67 @@ pub trait Frame {
     fn start(&mut self);
 }
 
+/// What keys were held down during an event
+#[derive(Clone, Debug)]
+pub struct EventModifiers {
+    control: bool,
+    shift: bool,
+    /// Also super, win or mac key
+    hyper: bool,
+    /// Also the meta key
+    alt: bool,
+}
+
+impl EventModifiers {
+    fn new() -> EventModifiers {
+        EventModifiers {
+            control: false,
+            shift: false,
+            hyper: false,
+            alt: false,
+        }
+    }
+}
+
+/// Emacs calls the key/button pressed the basic part of an event
+#[derive(Debug)]
+pub enum BasicEvent {
+    Backspace,
+    Del,
+    Char(char),
+}
+
+/// An Emacs event
+///
+/// Events in Emacs appear to be limited to key and button presses by the
+/// user.
+#[derive(Debug)]
+pub struct Event {
+    pub basic: BasicEvent,
+    pub modifiers: EventModifiers,
+}
+
+impl Event {
+    fn new(basic: BasicEvent, mods: EventModifiers) -> Event {
+        Event {
+            basic: basic,
+            modifiers: mods,
+        }
+    }
+}
+
 pub struct OrbFrame {
     recv: Receiver<FrameCmd>,
     send: Sender<UserEvent>,
     win: Option<Window>,
+    mods: EventModifiers,
 }
 
+/// The result of trying to communicate with some other component.
 enum ComResult {
-    Ok(u32),
+    /// Number of messages received
+    Recvd(u32),
+    /// We should quit for some reason
     Quit,
 }
 
@@ -170,6 +229,7 @@ impl OrbFrame {
             recv: recv,
             send: send,
             win: None,
+            mods: EventModifiers::new(),
         }
     }
 
@@ -178,12 +238,19 @@ impl OrbFrame {
         let mut col = 0;
 
         for chr in txt.chars() {
-            if chr == '\n' {
-                line += 1;
-                col = 0;
+            match chr {
+                '\n' => {
+                    line += 1;
+                    col = 0;
+                },
+                '\t' => {
+                    col += 4;
+                },
+                _ => {
+                    win.char(x + 8 * col, y + 16 * line, chr, colour);
+                    col += 1;
+                },
             }
-            win.char(x + 8 * col, y + 16 * line, chr, colour);
-            col += 1;
         }
     }
 
@@ -232,7 +299,7 @@ impl OrbFrame {
             };
         }
 
-        ComResult::Ok(cnt)
+        ComResult::Recvd(cnt)
     }
 
     fn show(&mut self) {
@@ -256,18 +323,46 @@ impl OrbFrame {
             }}
         }
 
+        macro_rules! send_key {
+            ($key:ident) => {
+                send!(UserEvent::KeyEvent(Event::new(BasicEvent::$key, self.mods.clone())))
+            }
+        }
+
         if let Some(ref mut win) = self.win {
             for event in win.events() {
                 cnt += 1;
                 match event.to_option() {
                     EventOption::Quit(_quit_event) => send!(UserEvent::Quit),
-                    EventOption::Key(key) if key.pressed => send!(UserEvent::KeyEvent(key.character)),
-                    event_option => println!("{:?}", event_option)
+                    EventOption::Key(key) => if key.pressed {
+                        match key.scancode {
+                            56 => self.mods.alt = true,
+                            29 => self.mods.control = true,
+                            42 | 54 => self.mods.shift = true,
+                            14 => send_key!(Backspace),
+                            83 => send_key!(Del),
+                            sc => if key.character == '\0' {
+                                println!("Unhandled key; scancode: {}", sc);
+                            } else {
+                                send!(UserEvent::new_keyevent(BasicEvent::Char(key.character),
+                                                              self.mods.clone()));
+                            },
+                        }
+                    } else {
+                        match key.scancode {
+                            56 => self.mods.alt = false,
+                            29 => self.mods.control = false,
+                            42 | 54 => self.mods.shift = false,
+                            _ => (),
+                        }
+                    },
+                    EventOption::Focus(f) if !f.focused => self.mods = EventModifiers::new(),
+                    event_option => println!("Unhandled event: {:?}", event_option)
                 }
             }
         }
 
-        ComResult::Ok(cnt)
+        ComResult::Recvd(cnt)
     }
 }
 
@@ -287,11 +382,11 @@ impl Frame for OrbFrame {
             let mut cnt = 0;
 
             match self.recv() {
-                ComResult::Ok(recvd) => cnt += recvd,
+                ComResult::Recvd(recvd) => cnt += recvd,
                 ComResult::Quit => break,
             }
             match self.react() {
-                ComResult::Ok(evnts) => cnt += evnts,
+                ComResult::Recvd(evnts) => cnt += evnts,
                 ComResult::Quit => break,
             }
 
