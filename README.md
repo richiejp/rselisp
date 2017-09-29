@@ -49,6 +49,8 @@ You can start something resembling a text editor by doing
 $ cargo run -- --editor
 ```
 
+![Mock Editor](mock-editor.png)
+
 Benchmarks can be run with `cargo bench` and unit tests with `cargo test`. To
 see what functions are implemented check `src/builtins.rs`.
 
