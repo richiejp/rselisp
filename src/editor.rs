@@ -6,6 +6,7 @@ use std::iter;
 use std::thread;
 use std::time;
 use std::sync::mpsc::{Sender, Receiver, TryRecvError};
+use std::sync::{Arc, RwLock};
 use orbclient;
 use orbclient::{Window, Renderer, EventOption, WindowFlag, Color};
 
@@ -29,6 +30,7 @@ pub struct Buffer {
     gap_indx: usize,
     gap_len: usize,
     gap_tmpl: &'static str,
+    fonts: Arc<RwLock<FontCache>>,
 }
 
 /// Iterates through the characters in the buffer's text
@@ -44,6 +46,7 @@ impl Buffer {
             gap_indx: 0,
             gap_len: 0,
             gap_tmpl: str::from_utf8(&[b' '; 1024]).unwrap(),
+            fonts: Arc::new(RwLock::new(FontCache::defualt())),
         };
         s.topup_gap();
         s
@@ -126,27 +129,146 @@ impl Buffer {
             .chain(self.gap_buf.chars().skip(self.gap_indx + self.gap_len))
     }
 
+    pub fn layout(&self) -> Content {
+        let frags = Vec::new();
+        let text = String::new();
+        let itr = self.chars();
+        let mut frag = Fragment::new();
+        let mut frags = Vec::<Fragment>::new();
+        let dfont = &self.fonts.borrow().read().unwrap().array[0];
+
+        let push_frag = || {
+            frags.push(frag.clone());
+            frag = Fragment::new();
+            frag.height = dfont.height;
+        };
+
+        while let Some(c) = itr.next() {
+            match c {
+                '\n' => {
+                    frag.layout = Layout::FlowBreak;
+                    push_frag();
+                },
+                '\t' => {
+                    frag.width += frag.width % (dfont.width * 4);
+                    push_frag();
+                },
+                c => {
+                    match frag.text {
+                        FragmentText::None => frag.text = FragmentText::Indx {
+                            start: indx,
+                            end: indx,
+                            font: 0,
+                        },
+                        FragmentText::Indx { start: _, end: mut ref e, font: _ } => {
+                            e++;
+                        },
+                    }
+                    frag.width += dfont.width;
+                    text.push(c);
+                }
+            }
+        }
+
+        Content {
+            text: text,
+            fonts: self.fonts.clone(),
+            frags: frags,
+        }
+    }
+
     pub fn mode_line(&self) -> String {
         " U:**-  *scratch*\tAll (0,0)\t(Fake mode line)".to_owned()
     }
 }
 
+struct Font {
+    index: u8,
+    name: String,
+    width: u16,
+    height: u16,
+}
+
+impl Font {
+    fn default() -> Font {
+        index: 0,
+        name: "unifont".to_owned(),
+        width: 8,
+        height: 16,
+    }
+}
+
+struct FontCache {
+    array: Vec<Font>,
+    names: FnvHashMap<String, u8>,
+}
+
+impl FontCache {
+    fn default() -> FontCache {
+        FontCache {
+            array: vec![Font::default()],
+            names: [("unifont", 0)].iter().cloned().collect(),
+        }
+    }
+}
+
+#[derive(Clone)]
+enum FragmentText {
+    None,
+    Indx {
+        start: u16,
+        end: u16,
+        font: u8,
+    },
+}
+
+#[derive(Clone)]
+enum Layout {
+    Flow,
+    FlowBreak,
+}
+
+#[derive(Clone)]
+struct Fragment {
+    text: FragmentText,
+    width: u16,
+    height: u16,
+    layout: Layout,
+}
+
+impl Fragment {
+    fn new() -> Fragment {
+        Fragment {
+            text: FragmentText::None,
+            width: 0,
+            height: 0,
+            layout: Layout::Flow,
+        }
+    }
+}
+
+struct Content {
+    text: String,
+    fonts: Arc<RwLock<FontCache>>,
+    frags: Vec<Fragment>,
+}
+
 #[derive(Debug)]
 pub enum FrameCmd {
     Show,
-    Update(String),
+    Update(Content),
     Quit,
 }
 
 #[derive(Debug)]
 pub enum UserEvent {
-    KeyEvent(Event),
+    Key(Event),
     Quit,
 }
 
 impl UserEvent {
     fn new_keyevent(basic: BasicEvent, mods: EventModifiers) -> UserEvent {
-        UserEvent::KeyEvent(Event::new(basic, mods))
+        UserEvent::Key(Event::new(basic, mods))
     }
 }
 
@@ -325,7 +447,7 @@ impl OrbFrame {
 
         macro_rules! send_key {
             ($key:ident) => {
-                send!(UserEvent::KeyEvent(Event::new(BasicEvent::$key, self.mods.clone())))
+                send!(UserEvent::Key(Event::new(BasicEvent::$key, self.mods.clone())))
             }
         }
 
