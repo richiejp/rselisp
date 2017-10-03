@@ -1,14 +1,13 @@
 use std::fs::File;
 use std::io::prelude::*;
-use std::ptr;
-use std::str;
-use std::iter;
-use std::thread;
-use std::time;
+use std::{ptr, str, iter, thread, time, fmt};
 use std::sync::mpsc::{Sender, Receiver, TryRecvError};
 use std::sync::{Arc, RwLock};
+use std::borrow::Borrow;
 use orbclient;
 use orbclient::{Window, Renderer, EventOption, WindowFlag, Color};
+
+use fnv::FnvHashMap;
 
 /// Contains a textual document
 ///
@@ -46,7 +45,7 @@ impl Buffer {
             gap_indx: 0,
             gap_len: 0,
             gap_tmpl: str::from_utf8(&[b' '; 1024]).unwrap(),
-            fonts: Arc::new(RwLock::new(FontCache::defualt())),
+            fonts: Arc::new(RwLock::new(FontCache::default())),
         };
         s.topup_gap();
         s
@@ -130,45 +129,54 @@ impl Buffer {
     }
 
     pub fn layout(&self) -> Content {
-        let frags = Vec::new();
-        let text = String::new();
-        let itr = self.chars();
+        let mut text = String::new();
+        let mut itr = self.chars();
         let mut frag = Fragment::new();
         let mut frags = Vec::<Fragment>::new();
-        let dfont = &self.fonts.borrow().read().unwrap().array[0];
+        let fonts: &FontCache = &*(self.fonts.borrow() as &RwLock<FontCache>).read().unwrap();
+        let dfont: &Font = &fonts.array[0];
+        let mut indx = 0;
+        let mut x = 0;
 
-        let push_frag = || {
-            frags.push(frag.clone());
-            frag = Fragment::new();
-            frag.height = dfont.height;
-        };
+        macro_rules! push_frag {
+            () => {
+                if frag.height == 0 {
+                    frag.height = dfont.height + 1;
+                }
+                frags.push(frag.clone());
+                frag = Fragment::new();
+            }
+        }
 
         while let Some(c) = itr.next() {
             match c {
                 '\n' => {
                     frag.layout = Layout::FlowBreak;
-                    push_frag();
+                    push_frag!();
                 },
                 '\t' => {
-                    frag.width += frag.width % (dfont.width * 4);
-                    push_frag();
+                    frag.width += dfont.width * 4 - frag.width % (dfont.width * 4);
+                    push_frag!();
                 },
                 c => {
                     match frag.text {
                         FragmentText::None => frag.text = FragmentText::Indx {
                             start: indx,
-                            end: indx,
+                            end: indx + 1,
                             font: 0,
                         },
-                        FragmentText::Indx { start: _, end: mut ref e, font: _ } => {
-                            e++;
+                        FragmentText::Indx { start: _, end: ref mut e, font: _ } => {
+                            *e += 1;
                         },
                     }
                     frag.width += dfont.width;
                     text.push(c);
+                    indx += 1;
                 }
             }
         }
+
+        push_frag!();
 
         Content {
             text: text,
@@ -191,10 +199,12 @@ struct Font {
 
 impl Font {
     fn default() -> Font {
-        index: 0,
-        name: "unifont".to_owned(),
-        width: 8,
-        height: 16,
+        Font {
+            index: 0,
+            name: "unifont".to_owned(),
+            width: 8,
+            height: 16,
+        }
     }
 }
 
@@ -204,16 +214,24 @@ struct FontCache {
 }
 
 impl FontCache {
-    fn default() -> FontCache {
+    pub fn default() -> FontCache {
+        let mut names = FnvHashMap::<String, u8>::default();
+
+        names.insert("unifont".to_owned(), 0);
+
         FontCache {
             array: vec![Font::default()],
-            names: [("unifont", 0)].iter().cloned().collect(),
+            names: names,
         }
+    }
+
+    pub fn get(&self, i: usize) -> &Font {
+        &self.array[i]
     }
 }
 
-#[derive(Clone)]
-enum FragmentText {
+#[derive(Clone, Debug)]
+pub enum FragmentText {
     None,
     Indx {
         start: u16,
@@ -222,14 +240,14 @@ enum FragmentText {
     },
 }
 
-#[derive(Clone)]
-enum Layout {
+#[derive(Clone, Debug)]
+pub enum Layout {
     Flow,
     FlowBreak,
 }
 
-#[derive(Clone)]
-struct Fragment {
+#[derive(Clone, Debug)]
+pub struct Fragment {
     text: FragmentText,
     width: u16,
     height: u16,
@@ -247,10 +265,26 @@ impl Fragment {
     }
 }
 
-struct Content {
-    text: String,
+pub struct Content {
+    pub text: String,
     fonts: Arc<RwLock<FontCache>>,
-    frags: Vec<Fragment>,
+    pub frags: Vec<Fragment>,
+}
+
+impl Content {
+    fn new() -> Content {
+        Content {
+            text: String::new(),
+            fonts: Arc::<RwLock<FontCache>>::new(RwLock::new(FontCache::default())),
+            frags: Vec::<Fragment>::new(),
+        }
+    }
+}
+
+impl fmt::Debug for Content {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Content {{ text: {:?}, frags: {:?} }}", self.text, self.frags)
+    }
 }
 
 #[derive(Debug)]
@@ -345,6 +379,9 @@ enum ComResult {
     Quit,
 }
 
+const FG_COLOUR: Color = Color::rgb(0xbd, 0xc3, 0xce);
+const BG_COLOUR: Color = Color::rgb(0x2a, 0x2f, 0x38);
+
 impl OrbFrame {
     pub fn new(send: Sender<UserEvent>, recv: Receiver<FrameCmd>) -> OrbFrame {
         OrbFrame {
@@ -382,13 +419,34 @@ impl OrbFrame {
         OrbFrame::draw_str(win, x as i32, y as i32, txt, fg);
     }
 
-    fn update(&mut self, doc: String) {
+    fn draw(win: &mut Window, x: u32, y: u32, stuff: Content) {
+        let fonts: &FontCache = &*(stuff.fonts.borrow() as &RwLock<FontCache>).read().unwrap();
+        let mut u = x;
+        let mut v = y;
+
+        for frag in stuff.frags {
+            if let FragmentText::Indx { start: s, end: e, font: f } = frag.text {
+                let chr_width = fonts.get(f as usize).width;
+                for (i, chr) in stuff.text[s as usize .. e as usize].chars().enumerate() {
+                    win.char(u as i32 + chr_width as i32 * i as i32, v as i32, chr, FG_COLOUR);
+                }
+            }
+
+            if let Layout::FlowBreak = frag.layout {
+                u = x;
+                v += frag.height as u32;
+            } else {
+                u += frag.width as u32;
+            }
+        }
+    }
+
+    fn update(&mut self, doc: Content) {
         if let Some(ref mut win) = self.win {
             let (w, h) = (win.width(), win.height());
 
-            OrbFrame::draw_text_box(win, 0, 0, w, h - 32, &doc,
-                                    Color::rgb(0xbd, 0xc3, 0xce),
-                                    Color::rgb(0x2a, 0x2f, 0x38));
+            win.rect(0, 0, w, h, BG_COLOUR);
+            OrbFrame::draw(win, 4, 4, doc);
             OrbFrame::draw_text_box(win, 0, h - 32, w, 16, "MODE LINE",
                                     Color::rgb(0xbd, 0xc3, 0xce),
                                     Color::rgb(0x24, 0x2a, 0x34));
@@ -430,7 +488,7 @@ impl OrbFrame {
                                           700, 500,
                                           &"rselisp",
                                           &[WindowFlag::Async]).unwrap());
-        self.update("".to_owned());
+        self.update(Content::new());
     }
 
     /// React to user input events

@@ -13,12 +13,15 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+#![feature(const_fn)]
+
 use std::io::stdin;
 use std::fs::File;
 use std::io::prelude::*;
 use std::sync::mpsc::channel;
 use std::thread;
 
+extern crate fnv;
 extern crate orbclient;
 
 extern crate rselisp;
@@ -97,18 +100,19 @@ fn editor() {
     frm_cmd_send.send(FrameCmd::Show).unwrap();
 
     while let Ok(evt) = frm_evt_recv.recv() {
+        println!("RECEIVED EVENT: {:?}", evt);
         match evt {
             UserEvent::Quit => {
                 frm_cmd_send.send(FrameCmd::Quit).unwrap();
                 break;
             },
-            UserEvent::KeyEvent(kevt) => {
+            UserEvent::Key(kevt) => {
                 match kevt {
                     Event { basic: BasicEvent::Char(c), modifiers: _ } => {
                         cbuf.push(c);
                         buf.insert(cursor, &cbuf);
                         cbuf.pop();
-                        frm_cmd_send.send(FrameCmd::Update(buf.chars().collect())).unwrap();
+                        frm_cmd_send.send(FrameCmd::Update(buf.layout())).unwrap();
                         cursor += 1;
                     },
                     bevt => println!("Unhandled {:?}", bevt),
