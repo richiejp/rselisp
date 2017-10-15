@@ -136,7 +136,6 @@ impl Buffer {
         let fonts: &FontCache = &*(self.fonts.borrow() as &RwLock<FontCache>).read().unwrap();
         let dfont: &Font = &fonts.array[0];
         let mut indx = 0;
-        let mut x = 0;
 
         macro_rules! push_frag {
             () => {
@@ -316,18 +315,18 @@ pub trait Frame {
 }
 
 /// What keys were held down during an event
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct EventModifiers {
-    control: bool,
-    shift: bool,
+    pub control: bool,
+    pub shift: bool,
     /// Also super, win or mac key
-    hyper: bool,
+    pub hyper: bool,
     /// Also the meta key
-    alt: bool,
+    pub alt: bool,
 }
 
 impl EventModifiers {
-    fn new() -> EventModifiers {
+    pub fn new() -> EventModifiers {
         EventModifiers {
             control: false,
             shift: false,
@@ -338,7 +337,7 @@ impl EventModifiers {
 }
 
 /// Emacs calls the key/button pressed the basic part of an event
-#[derive(Debug)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub enum BasicEvent {
     Backspace,
     Del,
@@ -349,14 +348,14 @@ pub enum BasicEvent {
 ///
 /// Events in Emacs appear to be limited to key and button presses by the
 /// user.
-#[derive(Debug)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct Event {
     pub basic: BasicEvent,
     pub modifiers: EventModifiers,
 }
 
 impl Event {
-    fn new(basic: BasicEvent, mods: EventModifiers) -> Event {
+    pub fn new(basic: BasicEvent, mods: EventModifiers) -> Event {
         Event {
             basic: basic,
             modifiers: mods,

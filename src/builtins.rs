@@ -1,9 +1,16 @@
 use super::*;
 
+#[macro_export]
 macro_rules! take2 {
     ($itr:ident) => (($itr.next(), $itr.next()))
 }
 
+#[macro_export]
+macro_rules! take3 {
+    ($itr:ident) => (($itr.next(), $itr.next(), $itr.next()))
+}
+
+#[macro_export]
 macro_rules! def_builtin {
     ($name:expr, $rname:ident, $evaled:ident, $lsp:ident, $args:ident; $fn_body:block ) => (
         #[derive(Clone)]
@@ -223,4 +230,8 @@ def_builtin! { "listp", ListpBuiltin, Evaluated, _lsp, args; {
     } else {
         Err(format!("listp requires one argument"))
     }
+}}
+
+def_builtin! { "load", LoadBuiltin, Evaluated, lsp, args; {
+    Err("Not implemented".to_owned())
 }}

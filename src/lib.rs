@@ -19,13 +19,14 @@ use std::slice::Iter;
 use std::rc::Rc;
 use std::cell::RefCell;
 use std::fmt;
+use std::any::Any;
 
 use fnv::FnvHashMap;
 
 mod tokenizer;
 use tokenizer::*;
 
-mod builtins;
+pub mod builtins;
 use builtins::*;
 
 #[derive(Debug, Clone)]
@@ -36,9 +37,11 @@ pub enum Inner {
     Sxp(Sexp),
     Lambda(UserFunc),
     Ref(InnerRef),
+    Ext(External),
 }
 
 type InnerRef = Rc<RefCell<Inner>>;
+type External = Rc<RefCell<LispForm>>;
 
 impl Inner {
     fn ref_sxp(&mut self) -> &mut Sexp {
@@ -49,16 +52,24 @@ impl Inner {
         }
     }
 
-    fn into_ref(self) -> InnerRef {
+    pub fn into_ref(self) -> InnerRef {
         Rc::new(RefCell::new(self))
     }
 
-    fn nil() -> Inner {
+    pub fn nil() -> Inner {
         Inner::Sxp(Sexp::nil())
     }
 
-    fn t() -> Inner {
-        Inner::Sym("t".to_owned())
+    pub fn t() -> Inner {
+        Inner::sym("t")
+    }
+
+    pub fn sym(name: &str) -> Inner {
+        Inner::Sym(name.to_owned())
+    }
+
+    pub fn pair(a: Inner, b: Inner) -> Inner {
+        Inner::Sxp(Sexp::from(&[a, b]))
     }
 
     fn is_nil(&self) -> bool {
@@ -94,6 +105,12 @@ impl fmt::Display for Inner {
             &Inner::Sxp(ref sxp) => write!(f, "{}", sxp),
             &Inner::Lambda(ref fun) => write!(f, "{}", fun),
             &Inner::Ref(ref iref) => write!(f, "{}", &iref.borrow()),
+            &Inner::Ext(ref ext) => {
+                match ext.borrow().to_lisp() {
+                    Ok(lsp) => write!(f, "{}", lsp),
+                    Err(e) => write!(f, "(error \"{}\")", e),
+                }
+            },
         }
     }
 }
@@ -112,39 +129,46 @@ impl Sexp {
         }
     }
 
-    fn nil() -> Sexp {
+    pub fn nil() -> Sexp {
         Sexp {
             delim: '(',
             lst: Vec::new(),
         }
     }
-    
-    fn new(delim: char) -> Sexp {
+
+    pub fn new(delim: char) -> Sexp {
         Sexp {
             delim: delim,
             lst: Vec::new(),
         }
     }
 
-    fn from(lst: &[Inner]) -> Sexp {
+    pub fn from(lst: &[Inner]) -> Sexp {
         Sexp {
             delim: '(',
             lst: Vec::from(lst),
         }
     }
 
-    fn push(&mut self, child: Inner) {
+    pub fn vec_from(lst: &[Inner]) -> Sexp {
+        Sexp {
+            delim: '[',
+            lst: Vec::from(lst),
+        }
+    }
+
+    pub fn push(&mut self, child: Inner) {
         self.lst.push(child);
     }
 
-    fn car(&self) -> Inner {
+    pub fn car(&self) -> Inner {
         match self.lst.first() {
             Some(car) => car.clone(),
             None => Inner::nil(),
         }
     }
 
-    fn cdr(&self) -> Inner {
+    pub fn cdr(&self) -> Inner {
         match self.lst.split_first() {
             Some((_, rest)) => Inner::Sxp(Sexp::from(rest)),
             _ => Inner::nil(),
@@ -178,12 +202,12 @@ impl fmt::Display for Sexp {
 }
 
 #[derive(Clone)]
-enum EvalOption {
+pub enum EvalOption {
     Evaluated,
     Unevaluated,
 }
 
-trait Func {
+pub trait Func {
     fn eval_args(&self) -> EvalOption;
     fn name(&self) -> &str;
     fn call(&self, &mut Lsp, &mut Iter<Inner>) -> Result<Inner, String>;
@@ -250,7 +274,7 @@ impl Func for UserFunc {
         let mut ns = Namespace::new();
         for spec in self.args.iter() {
             if let Some(arg) = args.next() {
-                ns.reg_var(spec.name.clone(), arg);
+                ns.reg_var_s(spec.name.clone(), arg);
             } else {
                 return Err(format!("'{}' expected '{}' argument", self.name(), spec.name));
             }
@@ -268,7 +292,7 @@ impl fmt::Display for UserFunc {
     }
 }
 
-struct Namespace {
+pub struct Namespace {
     funcs: FnvHashMap<String, Rc<Func>>,
     vars: FnvHashMap<String, Inner>,
 }
@@ -281,21 +305,61 @@ impl Namespace {
         }
     }
 
-    fn reg_fn<F: 'static + Func>(&mut self, fun: F) {
+    pub fn reg_fn<F: 'static + Func>(&mut self, fun: F) {
         self.funcs.insert(fun.name().to_owned(), Rc::new(fun));
     }
 
-    fn reg_var(&mut self, name: String, var: &Inner) {
+    pub fn reg_var_s(&mut self, name: String, var: &Inner) {
         self.vars.insert(name, match var {
             &Inner::Sxp(_) => Inner::Ref(var.clone().into_ref()),
             _ => var.clone(),
         });
     }
+
+    pub fn reg_var(&mut self, name: &str, var: &Inner) {
+        self.reg_var_s(name.to_owned(), var);
+    }
+}
+
+pub trait LispForm: fmt::Debug {
+    fn rust_name(&self) -> &'static str;
+    fn lisp_name(&self) -> &'static str;
+
+    fn to_lisp(&self) -> Result<Inner, String> {
+        Err(format!("Type {} ({}) is opaque; LispForm::to_lisp is not implemented",
+                    self.rust_name(), self.lisp_name()))
+    }
+
+    fn from_lisp(&self, Inner) -> Result<Inner, String> {
+        Err(format!("Type {} ({}) is opaque; LispForm::from_lisp is not implemented",
+                    self.rust_name(), self.lisp_name()))
+    }
+
+    fn as_any(&mut self) -> &mut Any;
+}
+
+#[macro_export]
+macro_rules! with_downcast {
+    ($value:ident, $as:ident; $do:block) => (
+        if let &Inner::Ext(ref ext) = $value {
+            let ext = &mut *ext.borrow_mut();
+            let lname = ext.lisp_name();
+            let rname = ext.rust_name();
+
+            if let Some($value) = ext.as_any().downcast_mut::<$as>() {
+                Ok($do)
+            } else {
+                Err(format!("Downcast did not expect {} ({})", lname, rname))
+            }
+        } else {
+            Err(format!("Only external objects can be downcast, not: {}", $value))
+        }
+    )
 }
 
 pub struct Lsp {
-    globals: Namespace,
-    locals: Vec<Namespace>,
+    pub globals: Namespace,
+    pub locals: Vec<Namespace>,
 }
 
 impl Tokenizer for Lsp { }
@@ -319,15 +383,15 @@ impl Lsp {
         g.reg_fn(CdrBuiltin { });
         g.reg_fn(ListpBuiltin { });
 
-        g.reg_var("t".to_owned(), &Inner::t());
-        g.reg_var("nil".to_owned(), &Inner::nil());
-        
+        g.reg_var("t", &Inner::t());
+        g.reg_var("nil", &Inner::nil());
+
         Lsp {
             globals: g,
             locals: Vec::new(),
         }
     }
-    
+
     pub fn read(&self, input: &String) -> Result<Sexp, String> {
         match self.tokenize(input) {
             Ok(toks) => {
@@ -367,7 +431,7 @@ impl Lsp {
                                 if let Ok(i) = i32::from_str_radix(s, 10) {
                                     cur.push(Inner::Int(i));
                                 } else {
-                                    cur.push(Inner::Sym(s.to_owned()));
+                                    cur.push(Inner::sym(s));
                                 }
                                 if quot {
                                     quot = false;
@@ -386,7 +450,7 @@ impl Lsp {
                             &Token::Qot => unsafe {
                                 let cur = cur as *mut Sexp;
                                 let nsxp = (&mut *cur).new_inner_sxp('(');
-                                nsxp.push(Inner::Sym("quote".to_owned()));
+                                nsxp.push(Inner::sym("quote"));
                                 if !quot {
                                     anc.push(&mut *cur);
                                 }
@@ -424,7 +488,7 @@ impl Lsp {
     }
 
     #[inline]
-    fn eval_inner(&mut self, ast: &Inner) -> Result<Inner, String> {
+    pub fn eval_inner(&mut self, ast: &Inner) -> Result<Inner, String> {
         match ast {
             &Inner::Sym(ref s) => self.eval_sym(s),
             &Inner::Sxp(ref sxp) => self.eval(sxp),
