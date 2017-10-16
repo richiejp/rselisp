@@ -233,5 +233,7 @@ def_builtin! { "listp", ListpBuiltin, Evaluated, _lsp, args; {
 }}
 
 def_builtin! { "load", LoadBuiltin, Evaluated, lsp, args; {
-    Err("Not implemented".to_owned())
+    if let Some(name) = args.next() {
+        
+    }
 }}

@@ -20,6 +20,8 @@ use std::rc::Rc;
 use std::cell::RefCell;
 use std::fmt;
 use std::any::Any;
+use std::fs::read_dir;
+use std::path::Path;
 
 use fnv::FnvHashMap;
 
@@ -44,6 +46,27 @@ type InnerRef = Rc<RefCell<Inner>>;
 type External = Rc<RefCell<LispForm>>;
 
 impl Inner {
+    macro_rules! to_val {
+        ( $( $fn:ident, $inner:ident, $type:ident );* ) => ($(
+            fn $fn(&self) -> Result<&$type, String> {
+                if let &Inner:$inner(ref val) = self {
+                    Ok(val)
+                } else {
+                    Err(format!(concat!("Expected Inner:", stringify!($inner), ", but instead found {:?}"),
+                                $obj))
+                }
+            }
+        ))
+    }
+
+    to_val!(int_val, Int, i32;
+            str_val, Str, String;
+            sym_val, Sym, String;
+            sxp_val, Sxp, Sexp;
+            lam_val, Lambda, UserFunc;
+            ref_val, Ref, InnerRef;
+            ext_val, Ext, External)
+
     fn ref_sxp(&mut self) -> &mut Sexp {
         if let &mut Inner::Sxp(ref mut sxp) = self {
             sxp
@@ -68,8 +91,16 @@ impl Inner {
         Inner::Sym(name.to_owned())
     }
 
+    pub fn str(strng: &str) -> Inner {
+        Inner::Str(strng.to_owned())
+    }
+
     pub fn pair(a: Inner, b: Inner) -> Inner {
         Inner::Sxp(Sexp::from(&[a, b]))
+    }
+
+    pub fn list_from(items: &[Inner]) -> Inner {
+        Inner::Sxp(Sexp::from(items))
     }
 
     fn is_nil(&self) -> bool {
@@ -385,6 +416,7 @@ impl Lsp {
 
         g.reg_var("t", &Inner::t());
         g.reg_var("nil", &Inner::nil());
+        g.reg_var("load-path", &Inner::list_from(&[Inner::str("../../lisp")]));
 
         Lsp {
             globals: g,
@@ -440,7 +472,7 @@ impl Lsp {
                                 }
                             },
                             &Token::Str(ref s) => {
-                                cur.push(Inner::Str(s.to_owned()));
+                                cur.push(Inner::str(s));
                                 if quot {
                                     quot = false;
                                 } else {
@@ -539,5 +571,55 @@ impl Lsp {
         } else {
             Ok(Inner::Sxp(Sexp::nil()))
         }
+    }
+
+    pub fn load(&mut self, name: &str) -> Result<Inner, String> {
+        let lpaths = self.globals.vars.get("load-path").unwrap().sxp_val()?.lst;
+        let name = Path::new(name);
+        let file = lpaths.find( |dir_path| {
+            if let Ok(items) = Path::new(dir_path).read_dir() {
+                items.find( |item| {
+                    if !item.file_type().is_dir() {
+                        if let (Some(stem), Some(ext)) = (item.file_stem(), item.extension()) {
+                            if stem == name && ext == "el" {
+                                Some(item)
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                });
+            }
+        });
+
+        if file.is_none() {
+            Err(format!("Can not find {} in load-path", name))
+        }
+        let file = file.unwrap();
+
+        let mut src = String::new();
+        match File::open(file) {
+            Ok(mut fh) => {
+                if let Err(e) = fh.read_to_string(&mut src) {
+                    println!("I/O ERROR: {}", e);
+                    return;
+                }
+            },
+            Err(e) => {
+                println!("FILE ERROR: {}", e);
+                return;
+            },
+        }
+
+        match lsp.read(&src) {
+            Ok(sexp) => if let Err(e) = lsp.eval(&sexp) {
+                println!("EVAL ERROR: {}", e)
+            },
+            Err(e) => println!("READ ERROR: {}", e),
+        };
     }
 }
