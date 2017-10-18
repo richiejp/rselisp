@@ -31,6 +31,9 @@ use tokenizer::*;
 pub mod builtins;
 use builtins::*;
 
+/// A Lisp object
+///
+/// I should probably rename this to LispObj or something similar.
 #[derive(Debug, Clone)]
 pub enum Inner {
     Int(i32),
@@ -352,6 +355,7 @@ impl Namespace {
     }
 }
 
+/// Types which can be converted to and from Lisp
 pub trait LispForm: fmt::Debug {
     fn rust_name(&self) -> &'static str;
     fn lisp_name(&self) -> &'static str;
@@ -369,6 +373,10 @@ pub trait LispForm: fmt::Debug {
     fn as_any(&mut self) -> &mut Any;
 }
 
+/// Try to downcast an External trait to its concrete type
+///
+/// This is necessary for interacting with arbitrary structs shared between
+/// Lisp and Rust.
 #[macro_export]
 macro_rules! with_downcast {
     ($value:ident, $as:ident; $do:block) => (
@@ -388,6 +396,10 @@ macro_rules! with_downcast {
     )
 }
 
+/// The Lisp interpreter
+///
+/// Possibly also the compiler in the future. Currently this just executes the
+/// AST as is.
 pub struct Lsp {
     pub globals: Namespace,
     pub locals: Vec<Namespace>,

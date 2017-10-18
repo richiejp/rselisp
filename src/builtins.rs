@@ -10,6 +10,18 @@ macro_rules! take3 {
     ($itr:ident) => (($itr.next(), $itr.next(), $itr.next()))
 }
 
+/// Define a function which can be called from Lisp
+///
+/// It would be much nicer if we used a "Derive style" macro instead. This
+/// needs to be implemented as a compiler plugin using
+/// syntax::exit::base::ItemDecorator. This would also make it a lot easier to
+/// call these functions from Rust because we can declare them normally with
+/// regular arguments. So this would look something like:
+///
+/// #[defun(Unevaluated, Optional=[docstr, interactive], Rest=body)]
+/// fn lambda(args: Sexp, docstr: &str, interactive: ???, body: Iter<Inner>) -> UserFunc {
+///   ...
+/// }
 #[macro_export]
 macro_rules! def_builtin {
     ($name:expr, $rname:ident, $evaled:ident, $lsp:ident, $args:ident; $fn_body:block ) => (
