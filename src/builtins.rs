@@ -244,8 +244,23 @@ def_builtin! { "listp", ListpBuiltin, Evaluated, _lsp, args; {
     }
 }}
 
-def_builtin! { "load", LoadBuiltin, Evaluated, lsp, args; {
+def_builtin! { "load", LoadBuiltin, Unevaluated, lsp, args; {
     if let Some(name) = args.next() {
-        
+        let biref;
+        let name = if let &Inner::Ref(ref iref) = name {
+            biref = iref.borrow();
+            &biref
+        } else {
+            name
+        };
+
+        match name {
+            &Inner::Sym(ref name) | &Inner::Str(ref name) => {
+                lsp.load(name)
+            },
+            thing => Err(format!("load expects a symbol or string not {}", thing))
+        }
+    } else {
+        Err(format!("load requires one argument"))
     }
 }}

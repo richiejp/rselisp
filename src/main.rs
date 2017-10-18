@@ -184,8 +184,11 @@ fn editor() {
 
     lsp.globals.reg_fn(KeymapBuiltin { });
     lsp.globals.reg_fn(DefineKeyBuiltin { });
-
     lsp.globals.reg_var("global-map", &Inner::Ext(Rc::clone(&global_keymapcell) as Rc<RefCell<LispForm>>));
+    if let Err(e) = lsp.load("editor") {
+        println!("LISP ERROR: {}", e);
+        return;
+    }
 
     frm_cmd_send.send(FrameCmd::Show).unwrap();
 

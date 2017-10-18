@@ -1,1 +1,1 @@
-(define-key global-map "C-`" 'exit)
+(define-key global-map "\C-`" 'exit)
