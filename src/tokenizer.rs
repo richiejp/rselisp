@@ -38,7 +38,7 @@ pub trait Tokenizer {
             c => c,
         }
     }
-    
+
     fn tok_spc(&self, itr: &mut Peekable<Chars>) -> Result<Token, &'static str> {
         loop {
             if let Some(&c) = itr.peek() {
@@ -54,7 +54,7 @@ pub trait Tokenizer {
 
     fn tok_str(&self, q: char, itr: &mut Peekable<Chars>) -> Result<Token, &'static str> {
         let mut s = String::new();
-        
+
         while let Some(c) = itr.next() {
             match c {
                 '\\' => match itr.next() {
@@ -95,7 +95,7 @@ pub trait Tokenizer {
     fn tokenize(&self, input: &String) -> Result<Vec<Token>, &'static str> {
         let mut toks = Vec::<Token>::new();
         let mut itr = input.chars().peekable();
-        
+
         while let Some(c) = itr.next() {
             let res = match c {
                 ' ' | '\t' | '\n' | '\r' => self.tok_spc(&mut itr),
