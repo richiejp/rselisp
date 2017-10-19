@@ -597,6 +597,7 @@ impl Lsp {
         if let Some(first) = itr.next() {
             match first {
                 &Inner::Sym(ref s) => self.eval_fn(s, &mut itr),
+                &Inner::Lambda(ref fun) => self.apply(fun, &mut itr),
                 &Inner::Sxp(ref x) => match self.eval(x)? {
                     Inner::Lambda(ref fun) => self.apply(fun, &mut itr),
                     sxp => Err(format!("Invalid as a function: {:?}", sxp)),

@@ -32,7 +32,7 @@ impl Keymap {
     }
 
     pub fn define_key(&mut self, key: Event, def: Inner) {
-        if def.is_sym() {
+        if def.is_sym() || def.is_lam() {
             self.map.insert(key, Inner::list_from(&[def]));
         } else {
             self.map.insert(key, def);
