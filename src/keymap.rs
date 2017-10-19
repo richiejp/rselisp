@@ -32,7 +32,11 @@ impl Keymap {
     }
 
     pub fn define_key(&mut self, key: Event, def: Inner) {
-        self.map.insert(key, def);
+        if def.is_sym() {
+            self.map.insert(key, Inner::list_from(&[def]));
+        } else {
+            self.map.insert(key, def);
+        }
     }
 
     pub fn parse_key(&mut self, key: &str) -> Result<Event, String> {
@@ -128,12 +132,7 @@ def_builtin! { "define-key", DefineKeyBuiltin, Evaluated, _lsp, args; {
                 _ => return Err(format!("Expected event string or external Event type")),
             };
 
-            if let &Inner::Ref(_) = act {
-                keymap.define_key(evt.clone(), act.clone());
-            } else {
-                keymap.define_key(evt.clone(), Inner::Ref(act.clone().into_ref()));
-            }
-
+            keymap.define_key(evt.clone(), act.clone());
             keymap.lookup_key(&evt).unwrap().clone()
         })?)
     } else {

@@ -49,7 +49,7 @@ pub enum Inner {
 type InnerRef = Rc<RefCell<Inner>>;
 type External = Rc<RefCell<LispForm>>;
 
-macro_rules! to_val {
+macro_rules! gen_to_vals {
     ( $( $fn:ident, $inner:ident, $type:ident );+ ) => ($(
         fn $fn(&self) -> Result<&$type, String> {
             if let &Inner::$inner(ref val) = self {
@@ -62,15 +62,35 @@ macro_rules! to_val {
     )+)
 }
 
+macro_rules! gen_is_x {
+    ( $( $fn:ident, $inner:ident );+ ) => ($(
+        pub fn $fn(&self) -> bool {
+            if let &Inner::$inner(_) = self {
+                true
+            } else {
+                false
+            }
+        }
+    )+)
+}
+
 impl Inner {
 
-    to_val!{int_val, Int, i32;
-            str_val, Str, String;
-            sym_val, Sym, String;
-            sxp_val, Sxp, Sexp;
-            lam_val, Lambda, UserFunc;
-            ref_val, Ref, InnerRef;
-            ext_val, Ext, External}
+    gen_to_vals!{int_val, Int, i32;
+                 str_val, Str, String;
+                 sym_val, Sym, String;
+                 sxp_val, Sxp, Sexp;
+                 lam_val, Lambda, UserFunc;
+                 ref_val, Ref, InnerRef;
+                 ext_val, Ext, External}
+
+    gen_is_x!{is_int, Int;
+              is_str, Str;
+              is_sym, Sym;
+              is_sxp, Sxp;
+              is_lam, Lambda;
+              is_ref, Ref;
+              is_ext, Ext}
 
     fn ref_sxp(&mut self) -> &mut Sexp {
         if let &mut Inner::Sxp(ref mut sxp) = self {

@@ -202,11 +202,9 @@ fn editor() {
             UserEvent::Key(kevt) => {
                 let lookup = {
                     let global_keymap = &*global_keymapcell.borrow();
-                    if let Some(act) = global_keymap.lookup_key(&kevt) {
+                    global_keymap.lookup_key(&kevt).and_then( |act| {
                         Some(act.clone())
-                    } else {
-                        None
-                    }
+                    })
                 };
                 if let Some(action) = lookup {
                     match lsp.eval_inner(&action) {
