@@ -34,15 +34,36 @@ use builtins::*;
 
 /// A Lisp object
 ///
+/// Each item in this enumeration should have a single member which is the
+/// actual data. If you copy this data structure, you are also copying inner
+/// data, unless it is a Ref or Ext. However this structure is usually passed
+/// around as a plain (native Rust) reference within the lisp interpreter.
+///
+/// When a Lisp object needs to be (potentially) referred to in more than one
+/// place, then it can be wrapped in an Inner::Ref. Currently this happens
+/// when an object is assigned to a variable. I haven't given much time to
+/// studying the semantics of setting and getting elisp memory locations
+/// (setf), so the way things currently work is probably wrong. On the other
+/// hand using an enum of concrete values, then switching to a reference when
+/// needed seems like a reasonable way to handle data efficiently in an
+/// interpreter. Although resolving Inner::Refs is currently a mess.
+///
 /// I should probably rename this to LispObj or something similar.
 #[derive(Debug, Clone)]
 pub enum Inner {
+    /// Integer
     Int(i32),
+    /// String
     Str(String),
+    /// Symbol or atom
     Sym(String),
+    /// S-Expression or list
     Sxp(Sexp),
+    /// Function
     Lambda(UserFunc),
+    /// A reference to an object
     Ref(InnerRef),
+    /// A reference to a native Rust structure
     Ext(External),
 }
 
@@ -171,7 +192,14 @@ impl fmt::Display for Inner {
     }
 }
 
-#[derive(Debug, Clone)]
+/// S-Expression, list or vector
+///
+/// Usually a list in Lisp is a string of cons cells (linked-list). Here we
+/// are using a Rust vector and emulating cons cells. This is mainly because
+/// it allows me to reuse the Rust Vec/slice types and associated iterator
+/// functions. It is probably also more efficient for larger lists and the
+/// same for smaller.
+#[derive(Debug, Clone, PartialEq)]
 pub struct Sexp {
     delim: char,
     lst: Vec<Inner>,
@@ -257,15 +285,20 @@ impl fmt::Display for Sexp {
     }
 }
 
+/// Whether function arguments are self quoting or evaluated
 #[derive(Clone)]
 pub enum EvalOption {
     Evaluated,
     Unevaluated,
 }
 
+/// Something which can be called with arguments
 pub trait Func {
+    /// Return whether the arguments are evaluated
     fn eval_args(&self) -> EvalOption;
+    /// The canonical name of this function
     fn name(&self) -> &str;
+    /// Evaluate this function
     fn call(&self, &mut Lsp, &mut Iter<Inner>) -> Result<Inner, String>;
 }
 
@@ -305,6 +338,7 @@ fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
     }
 }
 
+/// A function created by the user with the lambda builtin
 #[derive(Clone, Debug)]
 pub struct UserFunc {
     name: String,
@@ -348,6 +382,12 @@ impl fmt::Display for UserFunc {
     }
 }
 
+/// A collection of named functions and variables
+///
+/// This is probably fairly close to an obarray in Emacs although we store
+/// functions and variables in different hash maps instead of using a single
+/// hash map which stores symbol objects with Name, Value, Function and
+/// Property list slots. This needs to be changed to the Emacs way.
 pub struct Namespace {
     funcs: FnvHashMap<String, Rc<Func>>,
     vars: FnvHashMap<String, Inner>,
