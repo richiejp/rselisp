@@ -93,6 +93,10 @@ def_builtin! { "quote", QuoteBuiltin, Unevaluated, _lsp, args; {
     }
 }}
 
+def_builtin! { "interactive", InteractiveBuiltin, Unevaluated, _lsp, _args; {
+    Ok(Inner::nil())
+}}
+
 def_builtin! { "lambda", LambdaBuiltin, Unevaluated, _lsp, args; {
     match take2!(args) {
         (Some(&Inner::Sxp(ref args_sxp)), Some(body)) => {

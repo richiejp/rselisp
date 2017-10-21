@@ -436,6 +436,7 @@ impl Lsp {
         g.reg_fn(PlusBuiltin { });
         g.reg_fn(MinusBuiltin { });
         g.reg_fn(QuoteBuiltin { });
+        g.reg_fn(InteractiveBuiltin { });
         g.reg_fn(LambdaBuiltin { });
         g.reg_fn(DefaliasBuiltin { });
         g.reg_fn(PrintBuiltin { });
