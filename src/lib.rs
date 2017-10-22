@@ -40,17 +40,15 @@ use builtins::*;
 /// around as a plain (native Rust) reference within the lisp interpreter.
 ///
 /// When a Lisp object needs to be (potentially) referred to in more than one
-/// place, then it can be wrapped in an Inner::Ref. Currently this happens
+/// place, then it can be wrapped in an LispObj::Ref. Currently this happens
 /// when an object is assigned to a variable. I haven't given much time to
 /// studying the semantics of setting and getting elisp memory locations
 /// (setf), so the way things currently work is probably wrong. On the other
 /// hand using an enum of concrete values, then switching to a reference when
 /// needed seems like a reasonable way to handle data efficiently in an
-/// interpreter. Although resolving Inner::Refs is currently a mess.
-///
-/// I should probably rename this to LispObj or something similar.
+/// interpreter. Although resolving LispObj::Refs is currently a mess.
 #[derive(Debug, Clone)]
-pub enum Inner {
+pub enum LispObj {
     /// Integer
     Int(i32),
     /// String
@@ -62,21 +60,21 @@ pub enum Inner {
     /// Function
     Lambda(UserFunc),
     /// A reference to an object
-    Ref(InnerRef),
+    Ref(LispObjRef),
     /// A reference to a native Rust structure
     Ext(External),
 }
 
-type InnerRef = Rc<RefCell<Inner>>;
+type LispObjRef = Rc<RefCell<LispObj>>;
 type External = Rc<RefCell<LispForm>>;
 
 macro_rules! gen_to_vals {
     ( $( $fn:ident, $inner:ident, $type:ident );+ ) => ($(
         fn $fn(&self) -> Result<&$type, String> {
-            if let &Inner::$inner(ref val) = self {
+            if let &LispObj::$inner(ref val) = self {
                 Ok(val)
             } else {
-                Err(format!(concat!("Expected Inner:", stringify!($inner), ", but instead found {:?}"),
+                Err(format!(concat!("Expected LispObj:", stringify!($inner), ", but instead found {:?}"),
                             self))
             }
         }
@@ -86,7 +84,7 @@ macro_rules! gen_to_vals {
 macro_rules! gen_is_x {
     ( $( $fn:ident, $inner:ident );+ ) => ($(
         pub fn $fn(&self) -> bool {
-            if let &Inner::$inner(_) = self {
+            if let &LispObj::$inner(_) = self {
                 true
             } else {
                 false
@@ -95,14 +93,14 @@ macro_rules! gen_is_x {
     )+)
 }
 
-impl Inner {
+impl LispObj {
 
     gen_to_vals!{int_val, Int, i32;
                  str_val, Str, String;
                  sym_val, Sym, String;
                  sxp_val, Sxp, Sexp;
                  lam_val, Lambda, UserFunc;
-                 ref_val, Ref, InnerRef;
+                 ref_val, Ref, LispObjRef;
                  ext_val, Ext, External}
 
     gen_is_x!{is_int, Int;
@@ -114,55 +112,55 @@ impl Inner {
               is_ext, Ext}
 
     fn ref_sxp(&mut self) -> &mut Sexp {
-        if let &mut Inner::Sxp(ref mut sxp) = self {
+        if let &mut LispObj::Sxp(ref mut sxp) = self {
             sxp
         } else {
             panic!("Not an Sexp");
         }
     }
 
-    pub fn into_ref(self) -> InnerRef {
+    pub fn into_ref(self) -> LispObjRef {
         Rc::new(RefCell::new(self))
     }
 
-    pub fn nil() -> Inner {
-        Inner::Sxp(Sexp::nil())
+    pub fn nil() -> LispObj {
+        LispObj::Sxp(Sexp::nil())
     }
 
-    pub fn t() -> Inner {
-        Inner::sym("t")
+    pub fn t() -> LispObj {
+        LispObj::sym("t")
     }
 
-    pub fn sym(name: &str) -> Inner {
-        Inner::Sym(name.to_owned())
+    pub fn sym(name: &str) -> LispObj {
+        LispObj::Sym(name.to_owned())
     }
 
-    pub fn str(strng: &str) -> Inner {
-        Inner::Str(strng.to_owned())
+    pub fn str(strng: &str) -> LispObj {
+        LispObj::Str(strng.to_owned())
     }
 
-    pub fn pair(a: Inner, b: Inner) -> Inner {
-        Inner::Sxp(Sexp::from(&[a, b]))
+    pub fn pair(a: LispObj, b: LispObj) -> LispObj {
+        LispObj::Sxp(Sexp::from(&[a, b]))
     }
 
-    pub fn list_from(items: &[Inner]) -> Inner {
-        Inner::Sxp(Sexp::from(items))
+    pub fn list_from(items: &[LispObj]) -> LispObj {
+        LispObj::Sxp(Sexp::from(items))
     }
 
     fn is_nil(&self) -> bool {
         match self {
-            &Inner::Sym(ref s) if s == "nil" => true,
-            &Inner::Sxp(ref sxp) if sxp.lst.len() == 0 => true,
+            &LispObj::Sym(ref s) if s == "nil" => true,
+            &LispObj::Sxp(ref sxp) if sxp.lst.len() == 0 => true,
             _ => false,
         }
     }
 }
 
-impl std::cmp::PartialEq for Inner {
-    fn eq(&self, other: &Inner) -> bool {
+impl std::cmp::PartialEq for LispObj {
+    fn eq(&self, other: &LispObj) -> bool {
         macro_rules! exact_eq {
             ($var:ident, $type:ident) => (
-                 if let &Inner::$type(ref b) = other {
+                 if let &LispObj::$type(ref b) = other {
                     $var == b
                 } else {
                     false
@@ -171,25 +169,25 @@ impl std::cmp::PartialEq for Inner {
         }
 
         match self {
-            &Inner::Int(ref i) => exact_eq!(i, Int),
-            &Inner::Str(ref s) => exact_eq!(s, Str),
-            &Inner::Sym(ref s) => exact_eq!(s, Sym),
-            &Inner::Sxp(ref s) => exact_eq!(s, Sxp),
+            &LispObj::Int(ref i) => exact_eq!(i, Int),
+            &LispObj::Str(ref s) => exact_eq!(s, Str),
+            &LispObj::Sym(ref s) => exact_eq!(s, Sym),
+            &LispObj::Sxp(ref s) => exact_eq!(s, Sxp),
             _ => panic!("Equality not implemented for {:?}", self),
         }
     }
 }
 
-impl fmt::Display for Inner {
+impl fmt::Display for LispObj {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            &Inner::Int(i) => write!(f, "{}", i),
-            &Inner::Str(ref s) => write!(f, "\"{}\"", s),
-            &Inner::Sym(ref s) => write!(f, "{}", s),
-            &Inner::Sxp(ref sxp) => write!(f, "{}", sxp),
-            &Inner::Lambda(ref fun) => write!(f, "{}", fun),
-            &Inner::Ref(ref iref) => write!(f, "{}", &iref.borrow()),
-            &Inner::Ext(ref ext) => {
+            &LispObj::Int(i) => write!(f, "{}", i),
+            &LispObj::Str(ref s) => write!(f, "\"{}\"", s),
+            &LispObj::Sym(ref s) => write!(f, "{}", s),
+            &LispObj::Sxp(ref sxp) => write!(f, "{}", sxp),
+            &LispObj::Lambda(ref fun) => write!(f, "{}", fun),
+            &LispObj::Ref(ref iref) => write!(f, "{}", &iref.borrow()),
+            &LispObj::Ext(ref ext) => {
                 match ext.borrow().to_lisp() {
                     Ok(lsp) => write!(f, "{}", lsp),
                     Err(e) => write!(f, "(error \"{}\")", e),
@@ -209,14 +207,14 @@ impl fmt::Display for Inner {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Sexp {
     delim: char,
-    lst: Vec<Inner>,
+    lst: Vec<LispObj>,
 }
 
 impl Sexp {
     pub fn root(func: String) -> Sexp {
         Sexp {
             delim: 'R',
-            lst: vec![Inner::Sym(func)],
+            lst: vec![LispObj::Sym(func)],
         }
     }
 
@@ -234,40 +232,40 @@ impl Sexp {
         }
     }
 
-    pub fn from(lst: &[Inner]) -> Sexp {
+    pub fn from(lst: &[LispObj]) -> Sexp {
         Sexp {
             delim: '(',
             lst: Vec::from(lst),
         }
     }
 
-    pub fn vec_from(lst: &[Inner]) -> Sexp {
+    pub fn vec_from(lst: &[LispObj]) -> Sexp {
         Sexp {
             delim: '[',
             lst: Vec::from(lst),
         }
     }
 
-    pub fn push(&mut self, child: Inner) {
+    pub fn push(&mut self, child: LispObj) {
         self.lst.push(child);
     }
 
-    pub fn car(&self) -> Inner {
+    pub fn car(&self) -> LispObj {
         match self.lst.first() {
             Some(car) => car.clone(),
-            None => Inner::nil(),
+            None => LispObj::nil(),
         }
     }
 
-    pub fn cdr(&self) -> Inner {
+    pub fn cdr(&self) -> LispObj {
         match self.lst.split_first() {
-            Some((_, rest)) => Inner::Sxp(Sexp::from(rest)),
-            _ => Inner::nil(),
+            Some((_, rest)) => LispObj::Sxp(Sexp::from(rest)),
+            _ => LispObj::nil(),
         }
     }
 
     fn new_inner_sxp(&mut self, delim: char) -> &mut Sexp {
-        self.lst.push(Inner::Sxp(Sexp::new(delim)));
+        self.lst.push(LispObj::Sxp(Sexp::new(delim)));
         self.lst.last_mut().unwrap().ref_sxp()
     }
 }
@@ -306,7 +304,7 @@ pub trait Func {
     /// The canonical name of this function
     fn name(&self) -> &str;
     /// Evaluate this function
-    fn call(&self, &mut Lsp, &mut Iter<Inner>) -> Result<Inner, String>;
+    fn call(&self, &mut Lsp, &mut Iter<LispObj>) -> Result<LispObj, String>;
 }
 
 #[derive(Clone, Debug)]
@@ -350,11 +348,11 @@ fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 pub struct UserFunc {
     name: String,
     args: ArgSpecs,
-    body: InnerRef,
+    body: LispObjRef,
 }
 
 impl UserFunc {
-    fn new(name: String, args: Vec<ArgSpec>, body: InnerRef) -> UserFunc {
+    fn new(name: String, args: Vec<ArgSpec>, body: LispObjRef) -> UserFunc {
         UserFunc {
             name: name,
             args: ArgSpecs(args),
@@ -367,7 +365,7 @@ impl Func for UserFunc {
     fn eval_args(&self) -> EvalOption { EvalOption::Evaluated }
     fn name(&self) -> &str { &self.name }
 
-    fn call(&self, lsp: &mut Lsp, args: &mut Iter<Inner>) -> Result<Inner, String> {
+    fn call(&self, lsp: &mut Lsp, args: &mut Iter<LispObj>) -> Result<LispObj, String> {
         let mut ns = Namespace::new();
         for spec in self.args.iter() {
             if let Some(arg) = args.next() {
@@ -385,7 +383,7 @@ impl Func for UserFunc {
 
 impl fmt::Display for UserFunc {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "('{} . (lambda {} {}))", &self.name, &self.args, Inner::Ref(self.body.clone()))
+        write!(f, "('{} . (lambda {} {}))", &self.name, &self.args, LispObj::Ref(self.body.clone()))
     }
 }
 
@@ -397,7 +395,7 @@ impl fmt::Display for UserFunc {
 /// Property list slots. This needs to be changed to the Emacs way.
 pub struct Namespace {
     funcs: FnvHashMap<String, Rc<Func>>,
-    vars: FnvHashMap<String, Inner>,
+    vars: FnvHashMap<String, LispObj>,
 }
 
 impl Namespace {
@@ -412,14 +410,14 @@ impl Namespace {
         self.funcs.insert(fun.name().to_owned(), Rc::new(fun));
     }
 
-    pub fn reg_var_s(&mut self, name: String, var: &Inner) {
+    pub fn reg_var_s(&mut self, name: String, var: &LispObj) {
         self.vars.insert(name, match var {
-            &Inner::Sxp(_) => Inner::Ref(var.clone().into_ref()),
+            &LispObj::Sxp(_) => LispObj::Ref(var.clone().into_ref()),
             _ => var.clone(),
         });
     }
 
-    pub fn reg_var(&mut self, name: &str, var: &Inner) {
+    pub fn reg_var(&mut self, name: &str, var: &LispObj) {
         self.reg_var_s(name.to_owned(), var);
     }
 }
@@ -429,12 +427,12 @@ pub trait LispForm: fmt::Debug {
     fn rust_name(&self) -> &'static str;
     fn lisp_name(&self) -> &'static str;
 
-    fn to_lisp(&self) -> Result<Inner, String> {
+    fn to_lisp(&self) -> Result<LispObj, String> {
         Err(format!("Type {} ({}) is opaque; LispForm::to_lisp is not implemented",
                     self.rust_name(), self.lisp_name()))
     }
 
-    fn from_lisp(&self, Inner) -> Result<Inner, String> {
+    fn from_lisp(&self, LispObj) -> Result<LispObj, String> {
         Err(format!("Type {} ({}) is opaque; LispForm::from_lisp is not implemented",
                     self.rust_name(), self.lisp_name()))
     }
@@ -449,7 +447,7 @@ pub trait LispForm: fmt::Debug {
 #[macro_export]
 macro_rules! with_downcast {
     ($value:ident, $as:ident; $do:block) => (
-        if let &Inner::Ext(ref ext) = $value {
+        if let &LispObj::Ext(ref ext) = $value {
             let ext = &mut *ext.borrow_mut();
             let lname = ext.lisp_name();
             let rname = ext.rust_name();
@@ -497,9 +495,9 @@ impl Lsp {
         g.reg_fn(ListpBuiltin { });
         g.reg_fn(LoadBuiltin { });
 
-        g.reg_var("t", &Inner::t());
-        g.reg_var("nil", &Inner::nil());
-        g.reg_var("load-path", &Inner::list_from(&[Inner::str("lisp")]));
+        g.reg_var("t", &LispObj::t());
+        g.reg_var("nil", &LispObj::nil());
+        g.reg_var("load-path", &LispObj::list_from(&[LispObj::str("lisp")]));
 
         Lsp {
             globals: g,
@@ -544,9 +542,9 @@ impl Lsp {
                             },
                             &Token::Atm(ref s) => {
                                 if let Ok(i) = i32::from_str_radix(s, 10) {
-                                    cur.push(Inner::Int(i));
+                                    cur.push(LispObj::Int(i));
                                 } else {
-                                    cur.push(Inner::sym(s));
+                                    cur.push(LispObj::sym(s));
                                 }
                                 if quot {
                                     quot = false;
@@ -555,7 +553,7 @@ impl Lsp {
                                 }
                             },
                             &Token::Str(ref s) => {
-                                cur.push(Inner::str(s));
+                                cur.push(LispObj::str(s));
                                 if quot {
                                     quot = false;
                                 } else {
@@ -565,7 +563,7 @@ impl Lsp {
                             &Token::Qot => unsafe {
                                 let cur = cur as *mut Sexp;
                                 let nsxp = (&mut *cur).new_inner_sxp('(');
-                                nsxp.push(Inner::sym("quote"));
+                                nsxp.push(LispObj::sym("quote"));
                                 if !quot {
                                     anc.push(&mut *cur);
                                 }
@@ -583,42 +581,42 @@ impl Lsp {
     }
 
     #[inline]
-    fn eval_sym(&self, sym: &str) -> Result<Inner, String> {
+    fn eval_sym(&self, sym: &str) -> Result<LispObj, String> {
         for ns in self.locals.iter().rev() {
             if let Some(var) = ns.vars.get(sym) {
-                return Ok(Inner::clone(var));
+                return Ok(LispObj::clone(var));
             }
         }
 
         if let Some(var) = self.globals.vars.get(sym) {
-            Ok(Inner::clone(var))
+            Ok(LispObj::clone(var))
         } else {
             Err(format!("No variable named {}", sym))
         }
     }
 
     #[inline]
-    fn eval_ref(&mut self, iref: &InnerRef) -> Result<Inner, String> {
+    fn eval_ref(&mut self, iref: &LispObjRef) -> Result<LispObj, String> {
         self.eval_inner(&iref.borrow())
     }
 
     #[inline]
-    pub fn eval_inner(&mut self, ast: &Inner) -> Result<Inner, String> {
+    pub fn eval_inner(&mut self, ast: &LispObj) -> Result<LispObj, String> {
         match ast {
-            &Inner::Sym(ref s) => self.eval_sym(s),
-            &Inner::Sxp(ref sxp) => self.eval(sxp),
-            &Inner::Ref(ref iref) => self.eval_ref(iref),
+            &LispObj::Sym(ref s) => self.eval_sym(s),
+            &LispObj::Sxp(ref sxp) => self.eval(sxp),
+            &LispObj::Ref(ref iref) => self.eval_ref(iref),
             _ => Ok(ast.clone()),
         }
     }
 
     #[inline]
-    fn eval_rest(&mut self, args: &mut Iter<Inner>) -> Result<Vec<Inner>, String> {
+    fn eval_rest(&mut self, args: &mut Iter<LispObj>) -> Result<Vec<LispObj>, String> {
         args.map( |arg| self.eval_inner(arg) ).collect()
     }
 
     #[inline]
-    fn apply(&mut self, fun: &Func, args: &mut Iter<Inner>) -> Result<Inner, String> {
+    fn apply(&mut self, fun: &Func, args: &mut Iter<LispObj>) -> Result<LispObj, String> {
         match fun.eval_args() {
             EvalOption::Evaluated => {
                 let ev_args = self.eval_rest(args)?;
@@ -629,7 +627,7 @@ impl Lsp {
     }
 
     #[inline]
-    fn eval_fn(&mut self, s: &str, args: &mut Iter<Inner>) -> Result<Inner, String> {
+    fn eval_fn(&mut self, s: &str, args: &mut Iter<LispObj>) -> Result<LispObj, String> {
         use std::borrow::Borrow;
 
         if let Some(fun) = self.globals.funcs.get(s).cloned() {
@@ -639,30 +637,30 @@ impl Lsp {
         }
     }
 
-    pub fn eval(&mut self, ast: &Sexp) -> Result<Inner, String> {
+    pub fn eval(&mut self, ast: &Sexp) -> Result<LispObj, String> {
         let mut itr = ast.lst.iter();
 
         if let Some(first) = itr.next() {
             match first {
-                &Inner::Sym(ref s) => self.eval_fn(s, &mut itr),
-                &Inner::Lambda(ref fun) => self.apply(fun, &mut itr),
-                &Inner::Sxp(ref x) => match self.eval(x)? {
-                    Inner::Lambda(ref fun) => self.apply(fun, &mut itr),
+                &LispObj::Sym(ref s) => self.eval_fn(s, &mut itr),
+                &LispObj::Lambda(ref fun) => self.apply(fun, &mut itr),
+                &LispObj::Sxp(ref x) => match self.eval(x)? {
+                    LispObj::Lambda(ref fun) => self.apply(fun, &mut itr),
                     sxp => Err(format!("Invalid as a function: {:?}", sxp)),
                 },
                 _ => Err(format!("Invalid as a function: {:?}", first)),
             }
         } else {
-            Ok(Inner::Sxp(Sexp::nil()))
+            Ok(LispObj::Sxp(Sexp::nil()))
         }
     }
 
-    pub fn load(&mut self, name: &str) -> Result<Inner, String> {
+    pub fn load(&mut self, name: &str) -> Result<LispObj, String> {
         let mut src = String::new();
         {
             let lpaths = &self.globals.vars.get("load-path").unwrap().ref_val()?.borrow();
             let lpaths = lpaths.sxp_val()?.lst.iter().map( |dir_path| -> &str {
-                if let &Inner::Str(ref dir_path) = dir_path {
+                if let &LispObj::Str(ref dir_path) = dir_path {
                     dir_path
                 } else {
                     ""

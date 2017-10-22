@@ -3,7 +3,7 @@ extern crate test;
 extern crate rselisp;
 
 use test::Bencher;
-use rselisp::{Lsp, Inner};
+use rselisp::{Lsp, LispObj};
 
 #[bench]
 fn fib(b: &mut Bencher) {
@@ -21,7 +21,7 @@ fn fib(b: &mut Bencher) {
 "#.to_owned();
     let ast = lsp.read(&src).unwrap();
 
-    b.iter(|| assert_eq!(Ok(Inner::Int(10946)), lsp.eval(&ast)));
+    b.iter(|| assert_eq!(Ok(LispObj::Int(10946)), lsp.eval(&ast)));
 }
 
 #[bench]

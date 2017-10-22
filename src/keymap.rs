@@ -13,7 +13,7 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use rselisp::{Lsp, Inner, LispForm, Sexp, Func, EvalOption};
+use rselisp::{Lsp, LispObj, LispForm, Sexp, Func, EvalOption};
 use editor::{Event, BasicEvent, EventModifiers};
 use fnv::FnvHashMap;
 use std::any::Any;
@@ -21,7 +21,7 @@ use std::slice::Iter;
 
 #[derive(Debug)]
 pub struct Keymap {
-    map: FnvHashMap<Event, Inner>,
+    map: FnvHashMap<Event, LispObj>,
 }
 
 impl Keymap {
@@ -31,9 +31,9 @@ impl Keymap {
         }
     }
 
-    pub fn define_key(&mut self, key: Event, def: Inner) {
+    pub fn define_key(&mut self, key: Event, def: LispObj) {
         if def.is_sym() || def.is_lam() {
-            self.map.insert(key, Inner::list_from(&[def]));
+            self.map.insert(key, LispObj::list_from(&[def]));
         } else {
             self.map.insert(key, def);
         }
@@ -78,7 +78,7 @@ impl Keymap {
         }
     }
 
-    pub fn lookup_key(&self, key: &Event) -> Option<&Inner> {
+    pub fn lookup_key(&self, key: &Event) -> Option<&LispObj> {
         self.map.get(key)
     }
 
@@ -96,14 +96,14 @@ impl LispForm for Keymap {
         "keymap"
     }
 
-    fn to_lisp(&self) -> Result<Inner, String> {
-        let mut sxp = Sexp::from(&[Inner::sym("keymap")]);
+    fn to_lisp(&self) -> Result<LispObj, String> {
+        let mut sxp = Sexp::from(&[LispObj::sym("keymap")]);
 
         for (evt, act) in self.map.iter() {
-            sxp.push(Inner::pair(evt.to_lisp()?, act.clone()));
+            sxp.push(LispObj::pair(evt.to_lisp()?, act.clone()));
         }
 
-        Ok(Inner::Sxp(sxp))
+        Ok(LispObj::Sxp(sxp))
     }
 
     fn as_any(&mut self) -> &mut Any {
@@ -114,9 +114,9 @@ impl LispForm for Keymap {
 def_builtin! { "keymapp", KeymapBuiltin, Evaluated, _lsp, args; {
     if let Some(s) = args.next() {
         match s {
-            &Inner::Ext(ref ext) if Keymap::is_keymap(&*ext.borrow()) => Ok(Inner::t()),
-            &Inner::Sxp(ref sxp) if sxp.car() == Inner::sym("keymap") => Ok(Inner::t()),
-            _ => Ok(Inner::nil()),
+            &LispObj::Ext(ref ext) if Keymap::is_keymap(&*ext.borrow()) => Ok(LispObj::t()),
+            &LispObj::Sxp(ref sxp) if sxp.car() == LispObj::sym("keymap") => Ok(LispObj::t()),
+            _ => Ok(LispObj::nil()),
         }
     } else {
         Err(format!("keymapp requires one argument"))
@@ -127,8 +127,8 @@ def_builtin! { "define-key", DefineKeyBuiltin, Evaluated, _lsp, args; {
     if let (Some(keymap), Some(evt), Some(act)) = take3!(args) {
         Ok(with_downcast!(keymap, Keymap; {
             let evt = match evt {
-                &Inner::Ext(_) => with_downcast!(evt, Event; { evt.clone() } )?,
-                &Inner::Str(ref s) => keymap.parse_key(s)?,
+                &LispObj::Ext(_) => with_downcast!(evt, Event; { evt.clone() } )?,
+                &LispObj::Str(ref s) => keymap.parse_key(s)?,
                 _ => return Err(format!("Expected event string or external Event type")),
             };
 
