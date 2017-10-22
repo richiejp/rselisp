@@ -57,7 +57,9 @@ pub enum LispObj {
     Sym(String),
     /// S-Expression or list
     Sxp(Sexp),
-    /// Function
+    /// Function defined by the user
+    ///
+    /// The object UserFunc is bulking up the size of LispObj
     Lambda(UserFunc),
     /// A reference to an object
     Ref(LispObjRef),
@@ -711,5 +713,25 @@ impl Lsp {
 
         let sexp = self.read(&src)?;
         self.eval(&sexp)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::mem::size_of;
+
+    #[test]
+    fn reasonabl_obj_size() {
+        let lisp_obj_size = size_of::<LispObj>();
+        let sxp_size = size_of::<Sexp>();
+        println!("size of String = {}", size_of::<String>());
+        println!("size of char = {}", size_of::<char>());
+        println!("size of Sexp = {}", size_of::<Sexp>());
+        println!("size of UserFunc = {}", size_of::<UserFunc>());
+        println!("size of LispObjRef = {}", size_of::<LispObjRef>());
+        println!("size of LispObj = {}", lisp_obj_size);
+        println!("size of Vec<LispObj> = {}", size_of::<Vec<LispObj>>());
+        assert!(lisp_obj_size <= 64);
     }
 }
