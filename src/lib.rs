@@ -160,15 +160,22 @@ impl Inner {
 
 impl std::cmp::PartialEq for Inner {
     fn eq(&self, other: &Inner) -> bool {
-        match self {
-            &Inner::Int(i) => {
-                if let &Inner::Int(oi) = other {
-                    i == oi
+        macro_rules! exact_eq {
+            ($var:ident, $type:ident) => (
+                 if let &Inner::$type(ref b) = other {
+                    $var == b
                 } else {
                     false
                 }
-            },
-            _ => panic!("Only equality of Inner::Int implemented"),
+            )
+        }
+
+        match self {
+            &Inner::Int(ref i) => exact_eq!(i, Int),
+            &Inner::Str(ref s) => exact_eq!(s, Str),
+            &Inner::Sym(ref s) => exact_eq!(s, Sym),
+            &Inner::Sxp(ref s) => exact_eq!(s, Sxp),
+            _ => panic!("Equality not implemented for {:?}", self),
         }
     }
 }
