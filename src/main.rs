@@ -29,7 +29,10 @@ extern crate orbclient;
 
 #[macro_use]
 extern crate rselisp;
-use rselisp::{Lsp, Inner, Sexp, LispForm};
+use rselisp::{Lsp, LispObj, Sexp, LispForm, External};
+use rselisp::symbols;
+use rselisp::symbols::Symbol;
+use rselisp::lambda::Func;
 
 mod editor;
 use editor::{Buffer, Frame, OrbFrame, FrameCmd, Event, UserEvent, BasicEvent, EventModifiers};
@@ -52,11 +55,11 @@ impl LispForm for BasicEvent {
         ""
     }
 
-    fn to_lisp(&self) -> Result<Inner, String> {
+    fn to_lisp(&self) -> Result<LispObj, String> {
         Ok(match self {
-            &BasicEvent::Backspace => Inner::Sxp(Sexp::vec_from(&[Inner::Sym("backspace".to_owned())])),
-            &BasicEvent::Del => Inner::Sxp(Sexp::vec_from(&[Inner::Sym("delete".to_owned())])),
-            &BasicEvent::Char(c) => Inner::Str(c.to_string().to_owned()),
+            &BasicEvent::Backspace => LispObj::Sxp(Sexp::vec_from(&[LispObj::Str("backspace".to_owned())])),
+            &BasicEvent::Del => LispObj::Sxp(Sexp::vec_from(&[LispObj::Str("delete".to_owned())])),
+            &BasicEvent::Char(c) => LispObj::Str(c.to_string().to_owned()),
         })
     }
 
@@ -74,12 +77,12 @@ impl LispForm for EventModifiers {
         ""
     }
 
-    fn to_lisp(&self) -> Result<Inner, String> {
+    fn to_lisp(&self) -> Result<LispObj, String> {
         let mut mods = Sexp::new('[');
 
         macro_rules! c {
             ($field:ident) => {
-                if self.$field { mods.push(Inner::Sym("$field".to_owned())) }
+                if self.$field { mods.push(LispObj::Str("$field".to_owned())) }
             }
         }
 
@@ -88,7 +91,7 @@ impl LispForm for EventModifiers {
         c!(hyper);
         c!(alt);
 
-        Ok(Inner::Sxp(mods))
+        Ok(LispObj::Sxp(mods))
     }
 
     fn as_any(&mut self) -> &mut Any {
@@ -105,10 +108,10 @@ impl LispForm for Event {
         "event"
     }
 
-    fn to_lisp(&self) -> Result<Inner, String> {
-        Ok(Inner::Sxp(Sexp::from(&[
-            Inner::Sym(":basic".to_owned()), self.basic.to_lisp()?,
-            Inner::Sym(":modifiers".to_owned()), self.modifiers.to_lisp()?,
+    fn to_lisp(&self) -> Result<LispObj, String> {
+        Ok(LispObj::Sxp(Sexp::from(&[
+            LispObj::Str("basic".to_owned()), self.basic.to_lisp()?,
+            LispObj::Str("modifiers".to_owned()), self.modifiers.to_lisp()?,
         ])))
     }
 
@@ -128,7 +131,7 @@ fn repl() {
             Ok(_) => {
                 match lsp.read(&line) {
                     Ok(sexp) => match lsp.eval(&sexp) {
-                        Ok(Inner::Sym(ref s)) if s == "exit" => break,
+                        Ok(LispObj::Atm(symbols::EXIT)) => break,
                         Ok(resexp) => println!("-> {}", resexp),
                         Err(e) => println!("EVAL ERROR: {}", e),
                     },
@@ -182,9 +185,9 @@ fn editor() {
     let global_keymapcell = Rc::new(RefCell::new(Keymap::new()));
     let mut lsp = Lsp::new();
 
-    lsp.globals.reg_fn(KeymapBuiltin { });
-    lsp.globals.reg_fn(DefineKeyBuiltin { });
-    lsp.globals.reg_var("global-map", &Inner::Ext(Rc::clone(&global_keymapcell) as Rc<RefCell<LispForm>>));
+    reg_funcs!(lsp; KeymapBuiltin, DefineKeyBuiltin);
+    lsp.set_global("global-map",
+                   LispObj::Ext(Rc::clone(&global_keymapcell) as External));
     if let Err(e) = lsp.load("editor") {
         println!("LISP ERROR: {}", e);
         return;
@@ -209,7 +212,7 @@ fn editor() {
                 if let Some(action) = lookup {
                     match lsp.eval_inner(&action) {
                         Err(e) => println!("LISP ERROR: {}", e),
-                        Ok(Inner::Sym(ref s)) if s == "exit" => break,
+                        Ok(LispObj::Atm(symbols::EXIT)) => break,
                         s => println!("LISP SAYS: {:?}", s),
                     }
                 } else {
