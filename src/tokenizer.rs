@@ -15,6 +15,7 @@
 
 use std::str::Chars;
 use std::iter::Peekable;
+use symbols::{Atom, AtomRegistry};
 
 #[derive(Debug)]
 pub enum Token {

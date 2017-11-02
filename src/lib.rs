@@ -32,6 +32,9 @@ use tokenizer::*;
 pub mod builtins;
 use builtins::*;
 
+mod symbols;
+use symbols::*;
+
 /// A Lisp object
 ///
 /// Each item in this enumeration should have a single member which is the
@@ -724,7 +727,6 @@ mod tests {
     #[test]
     fn reasonabl_obj_size() {
         let lisp_obj_size = size_of::<LispObj>();
-        let sxp_size = size_of::<Sexp>();
         println!("size of String = {}", size_of::<String>());
         println!("size of char = {}", size_of::<char>());
         println!("size of Sexp = {}", size_of::<Sexp>());
