@@ -2,6 +2,7 @@ use std::fmt;
 use fnv::FnvHashMap;
 use std::rc::{Rc, Weak};
 use std::cell::RefCell;
+use std::usize;
 
 use super::*;
 
@@ -9,6 +10,12 @@ use super::*;
 pub struct Atom {
     indx: usize,
     reg: Weak<RefCell<AtomRegistry>>,
+}
+
+impl Atom {
+    fn default() -> Atom {
+        Atom { indx: usize::MAX, reg: Weak::new() }
+    }
 }
 
 impl PartialEq for Atom {
@@ -38,16 +45,30 @@ pub struct AtomRegistry {
     table: Vec<String>,
     rev_table: FnvHashMap<String, Atom>,
     self_ref: Weak<RefCell<AtomRegistry>>,
+
+    pub NIL: Atom,
+    pub LAMBDA: Atom,
+    pub MACRO: Atom,
 }
 
 impl AtomRegistry {
     fn with_capacity(capacity: usize) -> Rc<RefCell<AtomRegistry>> {
+        let cap = capacity + 3;
         let me = Rc::new(RefCell::new(AtomRegistry {
-            table: Vec::with_capacity(capacity),
-            rev_table: FnvHashMap::with_capacity_and_hasher(capacity, Default::default()),
+            table: Vec::with_capacity(cap),
+            rev_table: FnvHashMap::with_capacity_and_hasher(cap, Default::default()),
             self_ref: Weak::new(),
+            NIL: Atom::default(),
+            LAMBDA: Atom::default(),
+            MACRO: Atom::default(),
         }));
-        me.borrow_mut().self_ref = Rc::downgrade(&me);
+        {
+            let mut m = me.borrow_mut();
+            m.self_ref = Rc::downgrade(&me);
+            m.NIL = m.atomize("nil");
+            m.LAMBDA = m.atomize("lambda");
+            m.MACRO = m.atomize("macro");
+        }
         me
     }
 
@@ -82,8 +103,22 @@ mod tests {
     use super::*;
 
     #[test]
+    fn builtins() {
+        let reg = AtomRegistry::with_capacity(1);
+        let mut reg = reg.borrow_mut();
+
+        let atm = reg.atomize("nil");
+        assert_eq!(reg.NIL, atm);
+        let _cdr = reg.atomize("cdr");
+        let atm = reg.atomize("lambda");
+        assert_eq!(reg.LAMBDA, atm);
+        let atm = reg.atomize("macro");
+        assert_eq!(reg.MACRO, atm);
+    }
+
+    #[test]
     fn same_atom() {
-        let s = "lambda";
+        let s = "magit-imenu--repolist-extract-index-name-function";
         let reg = AtomRegistry::with_capacity(1);
         let mut reg = reg.borrow_mut();
 
