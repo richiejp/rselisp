@@ -33,7 +33,7 @@ pub mod builtins;
 use builtins::*;
 
 mod symbols;
-use symbols::*;
+use symbols::{Atom, AtomRegistry};
 
 /// A Lisp object
 ///
@@ -56,7 +56,9 @@ pub enum LispObj {
     Int(i32),
     /// String
     Str(String),
-    /// Symbol or atom
+    /// An Atom
+    Atm(Atom),
+    /// A Symbol
     Sym(String),
     /// S-Expression or list
     Sxp(Sexp),
@@ -102,6 +104,7 @@ impl LispObj {
 
     gen_to_vals!{int_val, Int, i32;
                  str_val, Str, String;
+                 atm_val, Atm, Atom;
                  sym_val, Sym, String;
                  sxp_val, Sxp, Sexp;
                  lam_val, Lambda, UserFunc;
@@ -110,6 +113,7 @@ impl LispObj {
 
     gen_is_x!{is_int, Int;
               is_str, Str;
+              is_atm, Atm;
               is_sym, Sym;
               is_sxp, Sxp;
               is_lam, Lambda;
@@ -136,8 +140,12 @@ impl LispObj {
         LispObj::sym("t")
     }
 
+    pub fn atm(name: Atom) -> LispObj {
+        LispObj::Atm(name)
+    }
+
     pub fn sym(name: &str) -> LispObj {
-        LispObj::Sym(name.to_owned())
+        LispObj::Sym(name.into())
     }
 
     pub fn str(strng: &str) -> LispObj {
@@ -154,7 +162,7 @@ impl LispObj {
 
     fn is_nil(&self) -> bool {
         match self {
-            &LispObj::Sym(ref s) if s == "nil" => true,
+            &LispObj::Atm(a) if a == symbols::NIL => true,
             &LispObj::Sxp(ref sxp) if sxp.lst.len() == 0 => true,
             _ => false,
         }
@@ -188,6 +196,7 @@ impl fmt::Display for LispObj {
         match self {
             &LispObj::Int(i) => write!(f, "{}", i),
             &LispObj::Str(ref s) => write!(f, "\"{}\"", s),
+            &LispObj::Atm(a) => write!(f, "a{:?}", a),
             &LispObj::Sym(ref s) => write!(f, "{}", s),
             &LispObj::Sxp(ref sxp) => write!(f, "{}", sxp),
             &LispObj::Lambda(ref fun) => write!(f, "{}", fun),
@@ -475,9 +484,14 @@ macro_rules! with_downcast {
 pub struct Lsp {
     pub globals: Namespace,
     pub locals: Vec<Namespace>,
+    atoms: AtomRegistry,
 }
 
-impl Tokenizer for Lsp { }
+impl Tokenizer for Lsp {
+    fn atoms(&mut self) -> &mut AtomRegistry {
+        &mut self.atoms
+    }
+}
 
 impl Lsp {
     pub fn new() -> Lsp {
@@ -507,16 +521,18 @@ impl Lsp {
         Lsp {
             globals: g,
             locals: Vec::new(),
+            atoms: AtomRegistry::with_capacity(1000),
         }
     }
 
-    pub fn read(&self, input: &String) -> Result<Sexp, String> {
+    pub fn read(&mut self, input: &String) -> Result<Sexp, String> {
         match self.tokenize(input) {
             Ok(toks) => {
                 //Iterator
                 let mut itr = toks.iter().peekable();
                 //AST root
                 let mut tree = Sexp::root("progn".to_owned());
+                //Are we inside a (quote ...)
                 let mut quot = false;
 
                 {
@@ -529,6 +545,7 @@ impl Lsp {
                             &Token::Lbr(c) => unsafe {
                                 let cur = cur as *mut Sexp;
                                 let nsxp = (&mut *cur).new_inner_sxp(c);
+                                // Quote only holds one item, so don't add it back to the stack
                                 if quot {
                                     quot = false;
                                 } else {
@@ -545,12 +562,16 @@ impl Lsp {
                                     return Err(format!("Can't quote closing delimiter '{}'", c));
                                 }
                             },
-                            &Token::Atm(ref s) => {
-                                if let Ok(i) = i32::from_str_radix(s, 10) {
-                                    cur.push(LispObj::Int(i));
+                            &Token::Atm(_) => {
+                                cur.push(LispObj::sym(""));
+                                if quot {
+                                    quot = false;
                                 } else {
-                                    cur.push(LispObj::sym(s));
+                                    anc.push(cur);
                                 }
+                            },
+                            &Token::Num(ref n) => {
+                                cur.push(LispObj::Int(n.significand.clone()));
                                 if quot {
                                     quot = false;
                                 } else {

@@ -1,7 +1,4 @@
-use std::fmt;
 use fnv::FnvHashMap;
-use std::rc::{Rc, Weak};
-use std::cell::RefCell;
 use std::usize;
 
 use super::*;
@@ -11,7 +8,7 @@ pub static LAMBDA: Atom = Atom { indx: 1 };
 pub static MACRO: Atom = Atom { indx: 2 };
 
 
-#[derive(PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub struct Atom {
     indx: usize,
 }
@@ -28,7 +25,7 @@ pub struct AtomRegistry {
 }
 
 impl AtomRegistry {
-    fn with_capacity(capacity: usize) -> AtomRegistry {
+    pub fn with_capacity(capacity: usize) -> AtomRegistry {
         let cap = capacity + 3;
         let mut me = AtomRegistry {
             table: Vec::with_capacity(cap),
@@ -49,6 +46,19 @@ impl AtomRegistry {
                 indx: self.table.len() - 1,
             };
             self.rev_table.insert(name.into(), atom.clone());
+            atom
+        }
+    }
+
+    pub fn atomize_mv(&mut self, name: String) -> Atom {
+        if let Some(atom) = self.rev_table.get(&name).and_then(|atm| Some(atm.clone())) {
+            atom
+        } else {
+            self.table.push(name.clone());
+            let atom = Atom {
+                indx: self.table.len() - 1,
+            };
+            self.rev_table.insert(name, atom.clone());
             atom
         }
     }
