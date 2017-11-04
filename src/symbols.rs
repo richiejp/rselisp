@@ -4,9 +4,9 @@ use std::usize;
 use super::*;
 
 pub static NIL: Atom = Atom { indx: 0 };
-pub static LAMBDA: Atom = Atom { indx: 1 };
-pub static MACRO: Atom = Atom { indx: 2 };
-
+pub static T: Atom = Atom { indx: 1 };
+pub static LAMBDA: Atom = Atom { indx: 2 };
+pub static MACRO: Atom = Atom { indx: 3 };
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub struct Atom {
@@ -32,6 +32,7 @@ impl AtomRegistry {
             rev_table: FnvHashMap::with_capacity_and_hasher(cap, Default::default()),
         };
         me.atomize("nil");
+        me.atomize("t");
         me.atomize("lambda");
         me.atomize("macro");
         me
