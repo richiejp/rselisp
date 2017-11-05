@@ -1,14 +1,6 @@
+#[macro_use]
 use super::*;
-
-#[macro_export]
-macro_rules! take2 {
-    ($itr:ident) => (($itr.next(), $itr.next()))
-}
-
-#[macro_export]
-macro_rules! take3 {
-    ($itr:ident) => (($itr.next(), $itr.next(), $itr.next()))
-}
+use lambda::{EvalOption, Func};
 
 /// Define a function which can be called from Lisp
 ///
@@ -97,29 +89,6 @@ def_builtin! { "interactive", InteractiveBuiltin, Unevaluated, _lsp, _args; {
     Ok(LispObj::nil())
 }}
 
-def_builtin! { "lambda", LambdaBuiltin, Unevaluated, _lsp, args; {
-    match take2!(args) {
-        (Some(&LispObj::Sxp(ref args_sxp)), Some(body)) => {
-            let largs: Result<Vec<ArgSpec>, String> = args_sxp.lst.iter().map(
-                |arg| -> Result<ArgSpec, String> {
-                    match arg {
-                        &LispObj::Sym(ref name) => Ok(ArgSpec::new(name.to_owned())),
-                        _ => Err(format!("Lambda arguments must be symbols")),
-                    }
-                }
-            ).collect();
-
-            Ok(LispObj::Lambda(
-                UserFunc::new("".to_owned(), largs?, match body {
-                    &LispObj::Ref(ref iref) => iref.clone(),
-                    _ => body.clone().into_ref(),
-                })
-            ))
-        },
-        _ => Err(format!("(lambda ([args]) [body])")),
-    }
-}}
-
 def_builtin! { "defalias", DefaliasBuiltin, Evaluated, lsp, args; {
     let name = match args.next() {
         Some(&LispObj::Sym(ref name)) => name,
@@ -131,7 +100,6 @@ def_builtin! { "defalias", DefaliasBuiltin, Evaluated, lsp, args; {
         _ => return Err(format!("defalias expected lambda")),
     };
 
-    fun.name = name.to_owned();
     lsp.globals.reg_fn(fun);
     Ok(LispObj::Sym(name.to_owned()))
 }}

@@ -44,5 +44,5 @@ fn cons(b: &mut Bencher) {
 "#.to_owned();
     let ast = lsp.read(&src).unwrap();
 
-    b.iter(|| lsp.eval(&ast));    
+    b.iter(|| lsp.eval(&ast));
 }

@@ -3,10 +3,10 @@ use std::usize;
 
 use super::*;
 
-pub static NIL: Atom = Atom { indx: 0 };
-pub static T: Atom = Atom { indx: 1 };
-pub static LAMBDA: Atom = Atom { indx: 2 };
-pub static MACRO: Atom = Atom { indx: 3 };
+pub const NIL: Atom = Atom { indx: 0 };
+pub const T: Atom = Atom { indx: 1 };
+pub const LAMBDA: Atom = Atom { indx: 2 };
+pub const MACRO: Atom = Atom { indx: 3 };
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub struct Atom {
@@ -71,9 +71,9 @@ impl AtomRegistry {
 
 pub struct Symbol {
     pub name: Atom,
-    pub value: Option<LispObj>,
-    pub function: Option<LispObj>,
-    pub properties: FnvHashMap<Atom, LispObj>,
+    pub value: Option<LispObjRef>,
+    pub function: Option<LispObjRef>,
+    pub properties: FnvHashMap<Atom, LispObjRef>,
 }
 
 #[cfg(test)]

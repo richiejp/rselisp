@@ -26,14 +26,27 @@ use std::io::Read;
 
 use fnv::FnvHashMap;
 
+#[macro_export]
+macro_rules! take2 {
+    ($itr:ident) => (($itr.next(), $itr.next()))
+}
+
+#[macro_export]
+macro_rules! take3 {
+    ($itr:ident) => (($itr.next(), $itr.next(), $itr.next()))
+}
+
 mod tokenizer;
 use tokenizer::*;
 
 pub mod builtins;
 use builtins::*;
 
-mod symbols;
+pub mod symbols;
 use symbols::{Atom, AtomRegistry};
+
+pub mod lambda;
+use lambda::{EvalOption, Func, UserFunc};
 
 /// A Lisp object
 ///
@@ -133,11 +146,11 @@ impl LispObj {
     }
 
     pub fn nil() -> LispObj {
-        LispObj::Sxp(Sexp::nil())
+        LispObj::atm(symbols::NIL)
     }
 
     pub fn t() -> LispObj {
-        LispObj::sym("t")
+        LispObj::atm(symbols::T)
     }
 
     pub fn atm(name: Atom) -> LispObj {
@@ -304,103 +317,6 @@ impl fmt::Display for Sexp {
     }
 }
 
-/// Whether function arguments are self quoting or evaluated
-#[derive(Clone)]
-pub enum EvalOption {
-    Evaluated,
-    Unevaluated,
-}
-
-/// Something which can be called with arguments
-pub trait Func {
-    /// Return whether the arguments are evaluated
-    fn eval_args(&self) -> EvalOption;
-    /// The canonical name of this function
-    fn name(&self) -> &str;
-    /// Evaluate this function
-    fn call(&self, &mut Lsp, &mut Iter<LispObj>) -> Result<LispObj, String>;
-}
-
-#[derive(Clone, Debug)]
-pub struct ArgSpec {
-    name: String,
-}
-
-impl ArgSpec {
-    fn new(name: String) -> ArgSpec {
-        ArgSpec {
-            name: name,
-        }
-    }
-}
-
-impl fmt::Display for ArgSpec {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", &self.name)
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct ArgSpecs(Vec<ArgSpec>);
-
-impl std::ops::Deref for ArgSpecs {
-    type Target = Vec<ArgSpec>;
-
-    fn deref(&self) -> &Vec<ArgSpec> {
-        &self.0
-    }
-}
-
-impl fmt::Display for ArgSpecs {
-fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        fmt_iter('[', &mut self.iter(), f)
-    }
-}
-
-/// A function created by the user with the lambda builtin
-#[derive(Clone, Debug)]
-pub struct UserFunc {
-    name: String,
-    args: ArgSpecs,
-    body: LispObjRef,
-}
-
-impl UserFunc {
-    fn new(name: String, args: Vec<ArgSpec>, body: LispObjRef) -> UserFunc {
-        UserFunc {
-            name: name,
-            args: ArgSpecs(args),
-            body: body,
-        }
-    }
-}
-
-impl Func for UserFunc {
-    fn eval_args(&self) -> EvalOption { EvalOption::Evaluated }
-    fn name(&self) -> &str { &self.name }
-
-    fn call(&self, lsp: &mut Lsp, args: &mut Iter<LispObj>) -> Result<LispObj, String> {
-        let mut ns = Namespace::new();
-        for spec in self.args.iter() {
-            if let Some(arg) = args.next() {
-                ns.reg_var_s(spec.name.clone(), arg);
-            } else {
-                return Err(format!("'{}' expected '{}' argument", self.name(), spec.name));
-            }
-        }
-        lsp.locals.push(ns);
-        let ret = lsp.eval_ref(&self.body);
-        lsp.locals.pop();
-        ret
-    }
-}
-
-impl fmt::Display for UserFunc {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "('{} . (lambda {} {}))", &self.name, &self.args, LispObj::Ref(self.body.clone()))
-    }
-}
-
 /// A collection of named functions and variables
 ///
 /// This is probably fairly close to an obarray in Emacs although we store
@@ -501,7 +417,6 @@ impl Lsp {
         g.reg_fn(MinusBuiltin { });
         g.reg_fn(QuoteBuiltin { });
         g.reg_fn(InteractiveBuiltin { });
-        g.reg_fn(LambdaBuiltin { });
         g.reg_fn(DefaliasBuiltin { });
         g.reg_fn(PrintBuiltin { });
         g.reg_fn(ExitBuiltin { });
@@ -514,8 +429,6 @@ impl Lsp {
         g.reg_fn(ListpBuiltin { });
         g.reg_fn(LoadBuiltin { });
 
-        g.reg_var("t", &LispObj::t());
-        g.reg_var("nil", &LispObj::nil());
         g.reg_var("load-path", &LispObj::list_from(&[LispObj::str("lisp")]));
 
         Lsp {
@@ -663,6 +576,19 @@ impl Lsp {
         }
     }
 
+    pub fn eval_primitive(&mut self, ast: &Sexp) -> Result<LispObj, String> {
+        let mut itr = ast.lst.iter();
+
+        if let Some(name) = itr.next() {
+            match name {
+                &LispObj::Atm(symbols::LAMBDA) => UserFunc::lambda(&mut itr),
+                obj => Ok(obj.clone()),
+            }
+        } else {
+            Ok(LispObj::nil())
+        }
+    }
+
     pub fn eval(&mut self, ast: &Sexp) -> Result<LispObj, String> {
         let mut itr = ast.lst.iter();
 
@@ -670,14 +596,14 @@ impl Lsp {
             match first {
                 &LispObj::Sym(ref s) => self.eval_fn(s, &mut itr),
                 &LispObj::Lambda(ref fun) => self.apply(fun, &mut itr),
-                &LispObj::Sxp(ref x) => match self.eval(x)? {
+                &LispObj::Sxp(ref x) => match self.eval_primitive(x)? {
                     LispObj::Lambda(ref fun) => self.apply(fun, &mut itr),
                     sxp => Err(format!("Invalid as a function: {:?}", sxp)),
                 },
                 _ => Err(format!("Invalid as a function: {:?}", first)),
             }
         } else {
-            Ok(LispObj::Sxp(Sexp::nil()))
+            Ok(LispObj::nil())
         }
     }
 
@@ -756,5 +682,23 @@ mod tests {
         println!("size of LispObj = {}", lisp_obj_size);
         println!("size of Vec<LispObj> = {}", size_of::<Vec<LispObj>>());
         assert!(lisp_obj_size <= 64);
+    }
+
+    #[test]
+    fn lambda_primitive_no_args() {
+        let mut lsp = Lsp::new();
+        let src = "((lambda () (+ 1 2)))".to_owned();
+
+        let ast = &lsp.read(&src).unwrap();
+        assert_eq!(lsp.eval(ast), Ok(LispObj::Int(3)));
+    }
+
+    #[test]
+    fn lambda_primitive() {
+        let mut lsp = Lsp::new();
+        let src = "((lambda (a b) (+ a b)) 1 2)".to_owned();
+
+        let ast = &lsp.read(&src).unwrap();
+        assert_eq!(lsp.eval(ast), Ok(LispObj::Int(3)));
     }
 }

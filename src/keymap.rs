@@ -13,7 +13,8 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use rselisp::{Lsp, LispObj, LispForm, Sexp, Func, EvalOption};
+use rselisp::{Lsp, LispObj, LispForm, Sexp};
+use rselisp::lambda::{Func, EvalOption};
 use editor::{Event, BasicEvent, EventModifiers};
 use fnv::FnvHashMap;
 use std::any::Any;
