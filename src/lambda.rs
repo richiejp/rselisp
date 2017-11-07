@@ -1,5 +1,6 @@
 #[macro_use]
 use super::*;
+use symbols::Atom;
 
 /// Whether function arguments are self quoting or evaluated
 #[derive(Clone)]
@@ -13,18 +14,18 @@ pub trait Func {
     /// Return whether the arguments are evaluated
     fn eval_args(&self) -> EvalOption;
     /// The canonical name of this function
-    fn name(&self) -> &str;
+    fn name(&self) -> Atom;
     /// Evaluate this function
     fn call(&self, &mut Lsp, &mut Iter<LispObj>) -> Result<LispObj, String>;
 }
 
 #[derive(Clone, Debug)]
 pub struct ArgSpec {
-    name: String,
+    name: Atom,
 }
 
 impl ArgSpec {
-    fn new(name: String) -> ArgSpec {
+    fn new(name: Atom) -> ArgSpec {
         ArgSpec {
             name: name,
         }
@@ -33,7 +34,7 @@ impl ArgSpec {
 
 impl fmt::Display for ArgSpec {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", &self.name)
+        write!(f, "{:?}", &self.name)
     }
 }
 
@@ -75,7 +76,7 @@ impl UserFunc {
                 let largs: Result<Vec<ArgSpec>, String> = args_sxp.lst.iter().map(
                     |arg| -> Result<ArgSpec, String> {
                         match arg {
-                            &LispObj::Sym(ref name) => Ok(ArgSpec::new(name.to_owned())),
+                            &LispObj::Atm(name) => Ok(ArgSpec::new(name)),
                             _ => Err(format!("Lambda arguments must be symbols")),
                         }
                     }
@@ -95,15 +96,16 @@ impl UserFunc {
 
 impl Func for UserFunc {
     fn eval_args(&self) -> EvalOption { EvalOption::Evaluated }
-    fn name(&self) -> &str { "" }
+    fn name(&self) -> FuncName { FuncName::None }
 
     fn call(&self, lsp: &mut Lsp, args: &mut Iter<LispObj>) -> Result<LispObj, String> {
         let mut ns = Namespace::new();
         for spec in self.args.iter() {
             if let Some(arg) = args.next() {
-                ns.reg_var_s(spec.name.clone(), arg);
+                ns.reg_var(spec.name, arg);
             } else {
-                return Err(format!("'{}' expected '{}' argument", self.name(), spec.name));
+                return Err(format!("'{}' expected '{}' argument",
+                                   &lsp.stringify(name), &lsp.stringify(spec.name)));
             }
         }
         lsp.locals.push(ns);
