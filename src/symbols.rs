@@ -3,10 +3,39 @@ use std::usize;
 
 use super::*;
 
-pub const NIL: Atom = Atom { indx: 0 };
-pub const T: Atom = Atom { indx: 1 };
-pub const LAMBDA: Atom = Atom { indx: 2 };
-pub const MACRO: Atom = Atom { indx: 3 };
+macro_rules! const_atoms {
+    () => {
+        NIL => "nil",
+        T => "t",
+        LAMBDA => "lambda",
+        MACRO => "macro",
+        ANONYMOUS => "#<anonymous>",
+    }
+}
+
+macro_rules! gen_const_atoms {
+    ( $( $const_var:ident => $name:ident ),+ ) => (
+        gen_const_atoms!( $( $const_var ),+ )
+    );
+    ($first:ident, $($rest:ident),*) => (
+        gen_const_atoms!($($rest),+ ; 0; $first = 0)
+    );
+    ($cur:ident, $($rest:ident),* ; $last_index: expr ; $($var:ident = $index:expr)+) => (
+        gen_const_atoms!($($rest),* ; $last_index + 1; $($var = $index)* $cur = $last_index + 1)
+    );
+    ($cur:ident; $last_index:expr ; $($var:ident = $index:expr)+) => (
+        $( pub const $var: Atom = Atom { indx: $index }; )+
+            pub const $cur: Atom = Atom { indx: $last_index }
+    );
+}
+
+gen_const_atoms!(const_atoms!());
+
+// pub const NIL: Atom = Atom { indx: 0 };
+// pub const T: Atom = Atom { indx: 1 };
+// pub const LAMBDA: Atom = Atom { indx: 2 };
+// pub const MACRO: Atom = Atom { indx: 3 };
+// pub const ANONYMOUS: Atom = Atom { indx: 4 };
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub struct Atom {
@@ -26,15 +55,23 @@ pub struct AtomRegistry {
 
 impl AtomRegistry {
     pub fn with_capacity(capacity: usize) -> AtomRegistry {
+        macro_rules! atomize_const_atoms {
+            ( $( $const_var:ident => $name:ident ),+ ) => (
+                $( me.atomize(stringify!($name)) );+
+            )
+        }
+
         let cap = capacity + 3;
         let mut me = AtomRegistry {
             table: Vec::with_capacity(cap),
             rev_table: FnvHashMap::with_capacity_and_hasher(cap, Default::default()),
         };
-        me.atomize("nil");
-        me.atomize("t");
-        me.atomize("lambda");
-        me.atomize("macro");
+        // me.atomize("nil");
+        // me.atomize("t");
+        // me.atomize("lambda");
+        // me.atomize("macro");
+        // me.atomize("#<anonymous>");
+        atomize_const_atoms!(const_atoms!());
         me
     }
 
@@ -69,11 +106,69 @@ impl AtomRegistry {
     }
 }
 
+pub struct SymbolData {
+    pub value: Option<LispObj>,
+    pub function: Option<LispObj>,
+    pub properties: Option<FnvHashMap<Atom, LispObj>>,
+}
+
 pub struct Symbol {
     pub name: Atom,
-    pub value: Option<LispObjRef>,
-    pub function: Option<LispObjRef>,
-    pub properties: FnvHashMap<Atom, LispObjRef>,
+    pub data: Rc<RefCell<SymbolData>>,
+}
+
+impl Symbol {
+    fn with_val(name: Atom, val: LispObj) -> Symbol {
+        Symbol {
+            name: name,
+            data: Rc::new(RefCell::new(SymbolData {
+                value: Some(val),
+                function: None,
+                properties: None,
+            })),
+        }
+    }
+
+    fn with_fun<F: 'static + Func>(name: Atom, fun: ) -> Symbol {
+        with_fun_obj(name, LispObj::ExtFun(fun))
+    }
+
+    fn with_fun_obj(name: Atom, fun: LispObj) -> Symbol {
+        Symbol {
+            name: name,
+            data: Rc::new(RefCell::new(SymbolData {
+                value: None,
+                function: Some(fun),
+                properties: None,
+            })),
+        }
+    }
+}
+
+/// A collection of named functions and variables
+///
+/// This is probably fairly close to an obarray in Emacs.
+pub struct Namespace {
+    syms: FnvHashMap<Atom, Symbol>,
+}
+
+impl Namespace {
+    fn new() -> Namespace {
+        Namespace {
+            syms: FnvHashMap::default(),
+        }
+    }
+
+    pub fn reg_fn(&mut self, atom: Atom, fun: &LispObj) {
+        self.funcs.insert(atom, fun.clone())
+    }
+
+    pub fn reg_var(&mut self, name: Atom, var: &LispObj) {
+        self.syms.insert(name, match var {
+            &LispObj::Sxp(_) => LispObj::Ref(var.clone().into_ref()),
+            _ => var.clone(),
+        });
+    }
 }
 
 #[cfg(test)]

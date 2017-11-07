@@ -43,7 +43,7 @@ pub mod builtins;
 use builtins::*;
 
 pub mod symbols;
-use symbols::{Atom, AtomRegistry};
+use symbols::{Atom, AtomRegistry, Namespace};
 
 pub mod lambda;
 use lambda::{EvalOption, Func, UserFunc};
@@ -72,7 +72,7 @@ pub enum LispObj {
     /// An Atom
     Atm(Atom),
     /// A Symbol
-    Sym(String),
+    Sym(Symbol),
     /// S-Expression or list
     Sxp(Sexp),
     /// Function defined by the user
@@ -321,41 +321,6 @@ fn fmt_iter<E, F>(brk: char, itr: &mut Iter<E>, f: &mut F) -> fmt::Result
 impl fmt::Display for Sexp {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
             fmt_iter('(', &mut self.lst.iter(), f)
-    }
-}
-
-/// A collection of named functions and variables
-///
-/// This is probably fairly close to an obarray in Emacs although we store
-/// functions and variables in different hash maps instead of using a single
-/// hash map which stores symbol objects with Name, Value, Function and
-/// Property list slots. This needs to be changed to the Emacs way.
-pub struct Namespace {
-    funcs: FnvHashMap<String, Rc<Func>>,
-    vars: FnvHashMap<String, LispObj>,
-}
-
-impl Namespace {
-    fn new() -> Namespace {
-        Namespace {
-            funcs: FnvHashMap::default(),
-            vars: FnvHashMap::default(),
-        }
-    }
-
-    pub fn reg_fn<F: 'static + Func>(&mut self, fun: F) {
-        self.funcs.insert(fun.name().to_owned(), Rc::new(fun));
-    }
-
-    pub fn reg_var_s(&mut self, name: String, var: &LispObj) {
-        self.vars.insert(name, match var {
-            &LispObj::Sxp(_) => LispObj::Ref(var.clone().into_ref()),
-            _ => var.clone(),
-        });
-    }
-
-    pub fn reg_var(&mut self, name: &str, var: &LispObj) {
-        self.reg_var_s(name.to_owned(), var);
     }
 }
 
