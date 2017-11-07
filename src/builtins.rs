@@ -1,6 +1,6 @@
 #[macro_use]
 use super::*;
-use lambda::{EvalOption, Func};
+use lambda::{EvalOption, Func, FuncName};
 
 /// Define a function which can be called from Lisp
 ///
@@ -18,14 +18,25 @@ use lambda::{EvalOption, Func};
 macro_rules! def_builtin {
     ($name:expr, $rname:ident, $evaled:ident, $lsp:ident, $args:ident; $fn_body:block ) => (
         #[derive(Clone)]
-        pub struct $rname { }
+        pub struct $rname {
+            name: Atom,
+        }
+
+        impl $rname {
+            fn new(atoms: &mut AtomRegistry) -> $rname {
+                $rname {
+                    name: atoms.atomize($name),
+                }
+            }
+        }
+
         impl Func for $rname {
             fn eval_args(&self) -> EvalOption {
                 EvalOption::$evaled
             }
 
-            fn name(&self) -> &'static str {
-                $name
+            fn name(&self) -> Atom {
+                self.name
             }
 
             fn call(&self, $lsp: &mut Lsp, $args: &mut Iter<LispObj>) -> Result<LispObj, String> {

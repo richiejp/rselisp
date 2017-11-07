@@ -83,10 +83,13 @@ pub enum LispObj {
     Ref(LispObjRef),
     /// A reference to a native Rust structure
     Ext(External),
+    /// A reference to a native function
+    ExtFun(ExternalFun),
 }
 
 type LispObjRef = Rc<RefCell<LispObj>>;
 type External = Rc<RefCell<LispForm>>;
+type ExternalFun = Rc<Func>;
 
 macro_rules! gen_to_vals {
     ( $( $fn:ident, $inner:ident, $type:ident );+ ) => ($(
@@ -179,6 +182,10 @@ impl LispObj {
             &LispObj::Sxp(ref sxp) if sxp.lst.len() == 0 => true,
             _ => false,
         }
+    }
+
+    pub fn extern_fun<F: 'static + Func>(&mut self, fun: F) -> LispObj {
+        LispObj::ExtFun(Rc::new(fun))
     }
 }
 
@@ -411,30 +418,40 @@ impl Tokenizer for Lsp {
 
 impl Lsp {
     pub fn new() -> Lsp {
-        let mut g = Namespace::new();
+        let ar = AtomRegistry::with_capacity(1000);
+        let g = Namespace::new();
 
-        g.reg_fn(PlusBuiltin { });
-        g.reg_fn(MinusBuiltin { });
-        g.reg_fn(QuoteBuiltin { });
-        g.reg_fn(InteractiveBuiltin { });
-        g.reg_fn(DefaliasBuiltin { });
-        g.reg_fn(PrintBuiltin { });
-        g.reg_fn(ExitBuiltin { });
-        g.reg_fn(PrognBuiltin { });
-        g.reg_fn(IfBuiltin { });
-        g.reg_fn(EqBuiltin { });
-        g.reg_fn(ConsBuiltin { });
-        g.reg_fn(CarBuiltin { });
-        g.reg_fn(CdrBuiltin { });
-        g.reg_fn(ListpBuiltin { });
-        g.reg_fn(LoadBuiltin { });
+        macro_rules! register_ext_funcs {
+            ( $($builtin:ident),+ ) => { $(
+                let fun = $builtin::new(&mut ar);
+                g.reg_fn(fun.name(), LispObj::extern_fun(fun));
+            ) }
+        }
+
+        register_ext_funcs!(
+            PlusBuiltin,
+            MinusBuiltin,
+            QuoteBuiltin,
+            InteractiveBuiltin,
+            DefaliasBuiltin,
+            PrintBuiltin,
+            ExitBuiltin,
+            PrognBuiltin,
+            IfBuiltin,
+            EqBuiltin,
+            ConsBuiltin,
+            CarBuiltin,
+            CdrBuiltin,
+            ListpBuiltin,
+            LoadBuiltin,
+        );
 
         g.reg_var("load-path", &LispObj::list_from(&[LispObj::str("lisp")]));
 
         Lsp {
             globals: g,
             locals: Vec::new(),
-            atoms: AtomRegistry::with_capacity(1000),
+            atoms: ar,
         }
     }
 
