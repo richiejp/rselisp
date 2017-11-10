@@ -1,6 +1,6 @@
-#[macro_use]
 use super::*;
-use lambda::{EvalOption, Func, FuncName};
+use lambda::{EvalOption, Func};
+use std::fmt;
 
 /// Define a function which can be called from Lisp
 ///
@@ -23,9 +23,15 @@ macro_rules! def_builtin {
         }
 
         impl $rname {
-            fn new(atoms: &mut AtomRegistry) -> $rname {
+            pub fn new_ar(atoms: &mut AtomRegistry) -> $rname {
                 $rname {
                     name: atoms.atomize($name),
+                }
+            }
+
+            pub fn new(lsp: &mut Lsp) -> $rname {
+                $rname {
+                    name: lsp.atomize($name),
                 }
             }
         }
@@ -43,7 +49,24 @@ macro_rules! def_builtin {
                 $fn_body
             }
         }
+
+        impl fmt::Debug for $rname {
+            fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                write!(f,
+                       concat!(stringify!($rname),
+                               " {{ name: ", $name, " ({:?}), ", stringify!($evaled), " }} "),
+                       self.name)
+            }
+        }
     )
+}
+
+#[macro_export]
+macro_rules! reg_funcs {
+    ( $lsp:ident; $($builtin:ident),+ ) => { $(
+        let fun = $builtin::new(&mut $lsp);
+        $lsp.globals.intern(Symbol::with_ext_fun(fun.name(), fun));
+    )+ }
 }
 
 def_builtin! { "-", MinusBuiltin, Evaluated, _lsp, args; {
@@ -100,21 +123,6 @@ def_builtin! { "interactive", InteractiveBuiltin, Unevaluated, _lsp, _args; {
     Ok(LispObj::nil())
 }}
 
-def_builtin! { "defalias", DefaliasBuiltin, Evaluated, lsp, args; {
-    let name = match args.next() {
-        Some(&LispObj::Sym(ref name)) => name,
-        _ => return Err(format!("defalias expected symbol")),
-    };
-
-    let mut fun = match args.next() {
-        Some(&LispObj::Lambda(ref lmbda)) => lmbda.clone(),
-        _ => return Err(format!("defalias expected lambda")),
-    };
-
-    lsp.globals.reg_fn(fun);
-    Ok(LispObj::Sym(name.to_owned()))
-}}
-
 def_builtin! { "print", PrintBuiltin, Evaluated, _lsp, args; {
     let mut s = String::new();
     let _res = fmt_iter('(', args, &mut s);
@@ -123,7 +131,7 @@ def_builtin! { "print", PrintBuiltin, Evaluated, _lsp, args; {
 }}
 
 def_builtin! { "exit", ExitBuiltin, Unevaluated, _lsp, _args; {
-    Ok(LispObj::Sym("exit".to_owned()))
+    Ok(LispObj::Atm(symbols::EXIT))
 }}
 
 def_builtin! { "progn", PrognBuiltin, Evaluated, _lsp, args; {
@@ -238,7 +246,11 @@ def_builtin! { "load", LoadBuiltin, Unevaluated, lsp, args; {
         };
 
         match name {
-            &LispObj::Sym(ref name) | &LispObj::Str(ref name) => {
+            &LispObj::Atm(name) => {
+                let name = lsp.stringify(name).to_owned();
+                lsp.load(&name)
+            },
+            &LispObj::Str(ref name) => {
                 lsp.load(name)
             },
             thing => Err(format!("load expects a symbol or string not {}", thing))

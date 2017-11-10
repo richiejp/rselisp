@@ -1,35 +1,31 @@
 use fnv::FnvHashMap;
 use std::usize;
+use std::fmt;
+use std::cmp;
 
 use super::*;
 
-macro_rules! const_atoms {
-    () => {
-        NIL => "nil",
-        T => "t",
-        LAMBDA => "lambda",
-        MACRO => "macro",
-        ANONYMOUS => "#<anonymous>",
-    }
-}
-
 macro_rules! gen_const_atoms {
-    ( $( $const_var:ident => $name:ident ),+ ) => (
-        gen_const_atoms!( $( $const_var ),+ )
-    );
-    ($first:ident, $($rest:ident),*) => (
-        gen_const_atoms!($($rest),+ ; 0; $first = 0)
-    );
-    ($cur:ident, $($rest:ident),* ; $last_index: expr ; $($var:ident = $index:expr)+) => (
-        gen_const_atoms!($($rest),* ; $last_index + 1; $($var = $index)* $cur = $last_index + 1)
-    );
-    ($cur:ident; $last_index:expr ; $($var:ident = $index:expr)+) => (
+    ($first:ident, $($rest:ident),*) => {
+        gen_const_atoms! {
+            $($rest),+ ; 0; $first = 0
+        }
+    };
+    ($cur:ident, $($rest:ident),* ; $last_index: expr ; $($var:ident = $index:expr)+) => {
+        gen_const_atoms! {
+            $($rest),* ; $last_index + 1; $($var = $index)* $cur = $last_index + 1
+        }
+    };
+    ($cur:ident; $last_index:expr ; $($var:ident = $index:expr)+) => {
         $( pub const $var: Atom = Atom { indx: $index }; )+
-            pub const $cur: Atom = Atom { indx: $last_index }
-    );
+           pub const $cur: Atom = Atom { indx: $last_index };
+    };
 }
 
-gen_const_atoms!(const_atoms!());
+// Must be in same order as atomize_const_atoms! below
+gen_const_atoms! {
+    NIL, T, LAMBDA, MACRO, ANONYMOUS, QUOTE, EXIT, LOAD_PATH, KEYMAP
+}
 
 // pub const NIL: Atom = Atom { indx: 0 };
 // pub const T: Atom = Atom { indx: 1 };
@@ -37,14 +33,14 @@ gen_const_atoms!(const_atoms!());
 // pub const MACRO: Atom = Atom { indx: 3 };
 // pub const ANONYMOUS: Atom = Atom { indx: 4 };
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
 pub struct Atom {
     indx: usize,
 }
 
-impl Atom {
-    fn new(indx: usize) -> Atom {
-        Atom { indx: indx }
+impl fmt::Display for Atom {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "#<a{}>", self.indx)
     }
 }
 
@@ -55,23 +51,28 @@ pub struct AtomRegistry {
 
 impl AtomRegistry {
     pub fn with_capacity(capacity: usize) -> AtomRegistry {
-        macro_rules! atomize_const_atoms {
-            ( $( $const_var:ident => $name:ident ),+ ) => (
-                $( me.atomize(stringify!($name)) );+
-            )
-        }
-
         let cap = capacity + 3;
         let mut me = AtomRegistry {
             table: Vec::with_capacity(cap),
             rev_table: FnvHashMap::with_capacity_and_hasher(cap, Default::default()),
         };
+
+        macro_rules! atomize_const_atoms {
+            ( $( $name:expr ),+ ) => (
+                $( me.atomize($name) );+
+            )
+        }
+
         // me.atomize("nil");
         // me.atomize("t");
         // me.atomize("lambda");
         // me.atomize("macro");
         // me.atomize("#<anonymous>");
-        atomize_const_atoms!(const_atoms!());
+        // Must be in the same order as gen_const_atoms! above
+        atomize_const_atoms!(
+            "nil", "t", "lambda", "macro", "#<anonymous>", "quote", "exit", "load-path",
+            "keymap"
+        );
         me
     }
 
@@ -112,36 +113,80 @@ pub struct SymbolData {
     pub properties: Option<FnvHashMap<Atom, LispObj>>,
 }
 
+impl SymbolData {
+    fn new(val: Option<LispObj>, fun: Option<LispObj>, props: Option<FnvHashMap<Atom, LispObj>>)
+           -> Rc<RefCell<SymbolData>>
+    {
+        Rc::new(RefCell::new(SymbolData {
+            value: val,
+            function: fun,
+            properties: props,
+        }))
+    }
+}
+
+#[derive(Clone)]
 pub struct Symbol {
     pub name: Atom,
     data: Rc<RefCell<SymbolData>>,
 }
 
 impl Symbol {
-    fn with_val(name: Atom, val: LispObj) -> Symbol {
+    pub fn new(name: Atom) -> Symbol {
         Symbol {
             name: name,
-            data: Rc::new(RefCell::new(SymbolData {
-                value: Some(val),
-                function: None,
-                properties: None,
-            })),
+            data: SymbolData::new(None, None, None),
         }
     }
 
-    fn with_ext_fun<F: 'static + Func>(name: Atom, fun: F) -> Symbol {
-        with_fun_obj(name, LispObj::ExtFun(fun))
-    }
-
-    fn with_fun(name: Atom, fun: LispObj) -> Symbol {
+    pub fn with_val(name: Atom, val: LispObj) -> Symbol {
         Symbol {
             name: name,
-            data: Rc::new(RefCell::new(SymbolData {
-                value: None,
-                function: Some(fun),
-                properties: None,
-            })),
+            data: SymbolData::new(Some(val), None, None)
         }
+    }
+
+    pub fn with_ext_fun<F: 'static + Func>(name: Atom, fun: F) -> Symbol {
+        Symbol::with_fun(name, LispObj::extern_fun(fun))
+    }
+
+    pub fn with_fun(name: Atom, fun: LispObj) -> Symbol {
+        Symbol {
+            name: name,
+            data: SymbolData::new(None, Some(fun), None)
+        }
+    }
+
+    pub fn get_val(&self) -> Option<LispObj> {
+        let data = self.data.borrow();
+        if let Some(ref val) = data.value {
+            Some(val.clone())
+        } else {
+            None
+        }
+    }
+
+    pub fn get_fun(&self) -> Option<LispObj> {
+        let data = self.data.borrow();
+        if let Some(ref val) = data.function {
+            Some(val.clone())
+        } else {
+            None
+        }
+    }
+}
+
+impl fmt::Debug for Symbol {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let data = self.data.borrow();
+        write!(f, "Symbol {{ name: {:?}, val: {:?}, fun: {:?}, props: {:?} }}",
+               self.name, data.value, data.function, data.properties)
+    }
+}
+
+impl cmp::PartialEq for Symbol {
+    fn eq(&self, other: &Symbol) -> bool {
+        self.name == other.name
     }
 }
 
@@ -153,14 +198,26 @@ pub struct Namespace {
 }
 
 impl Namespace {
-    fn new() -> Namespace {
+    pub fn new() -> Namespace {
         Namespace {
             syms: FnvHashMap::default(),
         }
     }
 
-    fn intern(&mut self, sym: Symbol) {
-        syms.insert(sym.name, sym);
+    pub fn intern(&mut self, sym: Symbol) {
+        self.syms.insert(sym.name, sym);
+    }
+
+    pub fn get(&self, name: Atom) -> Option<&Symbol> {
+        self.syms.get(&name)
+    }
+
+    pub fn get_val(&self, name: Atom) -> Option<LispObj> {
+        self.get(name).and_then( |sym| sym.get_val() )
+    }
+
+    pub fn get_fun(&self, name: Atom) -> Option<LispObj> {
+        self.get(name).and_then( |sym| sym.get_fun() )
     }
 }
 

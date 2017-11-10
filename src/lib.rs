@@ -24,8 +24,6 @@ use std::fs::File;
 use std::path::Path;
 use std::io::Read;
 
-use fnv::FnvHashMap;
-
 #[macro_export]
 macro_rules! take2 {
     ($itr:ident) => (($itr.next(), $itr.next()))
@@ -43,7 +41,7 @@ pub mod builtins;
 use builtins::*;
 
 pub mod symbols;
-use symbols::{Atom, AtomRegistry, Namespace};
+use symbols::{Atom, AtomRegistry, Symbol, Namespace};
 
 pub mod lambda;
 use lambda::{EvalOption, Func, UserFunc};
@@ -87,9 +85,9 @@ pub enum LispObj {
     ExtFun(ExternalFun),
 }
 
-type LispObjRef = Rc<RefCell<LispObj>>;
-type External = Rc<RefCell<LispForm>>;
-type ExternalFun = Rc<Func>;
+pub type LispObjRef = Rc<RefCell<LispObj>>;
+pub type External = Rc<RefCell<LispForm>>;
+pub type ExternalFun = Rc<Func>;
 
 macro_rules! gen_to_vals {
     ( $( $fn:ident, $inner:ident, $type:ident );+ ) => ($(
@@ -116,12 +114,13 @@ macro_rules! gen_is_x {
     )+)
 }
 
+#[allow(dead_code)]
 impl LispObj {
 
     gen_to_vals!{int_val, Int, i32;
                  str_val, Str, String;
                  atm_val, Atm, Atom;
-                 sym_val, Sym, String;
+                 sym_val, Sym, Symbol;
                  sxp_val, Sxp, Sexp;
                  lam_val, Lambda, UserFunc;
                  ref_val, Ref, LispObjRef;
@@ -160,8 +159,8 @@ impl LispObj {
         LispObj::Atm(name)
     }
 
-    pub fn sym(name: &str) -> LispObj {
-        LispObj::Sym(name.into())
+    pub fn sym(name: Atom) -> LispObj {
+        LispObj::Sym(Symbol::new(name))
     }
 
     pub fn str(strng: &str) -> LispObj {
@@ -184,11 +183,15 @@ impl LispObj {
         }
     }
 
-    pub fn extern_fun<F: 'static + Func>(&mut self, fun: F) -> LispObj {
+    pub fn extern_fun<F: 'static + Func>(fun: F) -> LispObj {
         LispObj::ExtFun(Rc::new(fun))
     }
 }
 
+// This should probably not be used by lisp builtins. Emacs has at least 3
+// equality operators: ==, eq, equals. This could be used for eq or equals,
+// but this may conflict with its use by the Rust standard library
+// (e.g. in assert_eq! or HashMap)
 impl std::cmp::PartialEq for LispObj {
     fn eq(&self, other: &LispObj) -> bool {
         macro_rules! exact_eq {
@@ -216,17 +219,21 @@ impl fmt::Display for LispObj {
         match self {
             &LispObj::Int(i) => write!(f, "{}", i),
             &LispObj::Str(ref s) => write!(f, "\"{}\"", s),
-            &LispObj::Atm(a) => write!(f, "a{:?}", a),
-            &LispObj::Sym(ref s) => write!(f, "{}", s),
+            &LispObj::Atm(a) => write!(f, "{}", a),
+            &LispObj::Sym(ref s) => write!(f, "{:?}", s),
             &LispObj::Sxp(ref sxp) => write!(f, "{}", sxp),
             &LispObj::Lambda(ref fun) => write!(f, "{}", fun),
             &LispObj::Ref(ref iref) => write!(f, "{}", &iref.borrow()),
             &LispObj::Ext(ref ext) => {
-                match ext.borrow().to_lisp() {
-                    Ok(lsp) => write!(f, "{}", lsp),
-                    Err(e) => write!(f, "(error \"{}\")", e),
+                let ext = ext.borrow();
+                match ext.to_lisp() {
+                    Ok(l) => write!(f, "{}", l),
+                    Err(_) => write!(f, "#<{}>", ext.rust_name())
                 }
             },
+            &LispObj::ExtFun(ref fun) => {
+                write!(f, "{:?}", fun)
+            }
         }
     }
 }
@@ -245,10 +252,10 @@ pub struct Sexp {
 }
 
 impl Sexp {
-    pub fn root(func: String) -> Sexp {
+    pub fn root(func: Atom) -> Sexp {
         Sexp {
             delim: 'R',
-            lst: vec![LispObj::Sym(func)],
+            lst: vec![LispObj::Atm(func)],
         }
     }
 
@@ -330,12 +337,12 @@ pub trait LispForm: fmt::Debug {
     fn lisp_name(&self) -> &'static str;
 
     fn to_lisp(&self) -> Result<LispObj, String> {
-        Err(format!("Type {} ({}) is opaque; LispForm::to_lisp is not implemented",
+        Err(format!("Type {} ({}) can not be converted to Lisp",
                     self.rust_name(), self.lisp_name()))
     }
 
     fn from_lisp(&self, LispObj) -> Result<LispObj, String> {
-        Err(format!("Type {} ({}) is opaque; LispForm::from_lisp is not implemented",
+        Err(format!("Type {} ({}) can not be created from Lisp",
                     self.rust_name(), self.lisp_name()))
     }
 
@@ -383,14 +390,14 @@ impl Tokenizer for Lsp {
 
 impl Lsp {
     pub fn new() -> Lsp {
-        let ar = AtomRegistry::with_capacity(1000);
-        let g = Namespace::new();
+        let mut ar = AtomRegistry::with_capacity(1000);
+        let mut g = Namespace::new();
 
         macro_rules! register_ext_funcs {
             ( $($builtin:ident),+ ) => { $(
-                let fun = $builtin::new(&mut ar);
+                let fun = $builtin::new_ar(&mut ar);
                 g.intern(Symbol::with_ext_fun(fun.name(), fun));
-            ) }
+            )+ }
         }
 
         register_ext_funcs!(
@@ -398,7 +405,6 @@ impl Lsp {
             MinusBuiltin,
             QuoteBuiltin,
             InteractiveBuiltin,
-            DefaliasBuiltin,
             PrintBuiltin,
             ExitBuiltin,
             PrognBuiltin,
@@ -408,10 +414,11 @@ impl Lsp {
             CarBuiltin,
             CdrBuiltin,
             ListpBuiltin,
-            LoadBuiltin,
+            LoadBuiltin
         );
 
-        g.reg_var("load-path", &LispObj::list_from(&[LispObj::str("lisp")]));
+        g.intern(Symbol::with_val(symbols::LOAD_PATH,
+                                  LispObj::list_from(&[LispObj::str("lisp")])));
 
         Lsp {
             globals: g,
@@ -420,13 +427,26 @@ impl Lsp {
         }
     }
 
+    pub fn atomize(&mut self, name: &str) -> Atom {
+        self.atoms.atomize(name)
+    }
+
+    pub fn stringify(&self, atom: Atom) -> &str {
+        self.atoms.stringify(atom)
+    }
+
+    pub fn set_global(&mut self, name: &str, value: LispObj) {
+        let name = self.atoms.atomize(name);
+        self.globals.intern(Symbol::with_val(name, value));
+    }
+
     pub fn read(&mut self, input: &String) -> Result<Sexp, String> {
         match self.tokenize(input) {
             Ok(toks) => {
                 //Iterator
                 let mut itr = toks.iter().peekable();
                 //AST root
-                let mut tree = Sexp::root("progn".to_owned());
+                let mut tree = Sexp::root(self.atoms.atomize("progn"));
                 //Are we inside a (quote ...)
                 let mut quot = false;
 
@@ -457,8 +477,8 @@ impl Lsp {
                                     return Err(format!("Can't quote closing delimiter '{}'", c));
                                 }
                             },
-                            &Token::Atm(_) => {
-                                cur.push(LispObj::sym(""));
+                            &Token::Atm(a) => {
+                                cur.push(LispObj::atm(a));
                                 if quot {
                                     quot = false;
                                 } else {
@@ -484,7 +504,7 @@ impl Lsp {
                             &Token::Qot => unsafe {
                                 let cur = cur as *mut Sexp;
                                 let nsxp = (&mut *cur).new_inner_sxp('(');
-                                nsxp.push(LispObj::sym("quote"));
+                                nsxp.push(LispObj::atm(symbols::QUOTE));
                                 if !quot {
                                     anc.push(&mut *cur);
                                 }
@@ -502,17 +522,26 @@ impl Lsp {
     }
 
     #[inline]
-    fn eval_sym(&self, sym: &str) -> Result<LispObj, String> {
+    fn eval_atm_val(&self, atm: Atom) -> Result<LispObj, String> {
         for ns in self.locals.iter().rev() {
-            if let Some(var) = ns.vars.get(sym) {
-                return Ok(LispObj::clone(var));
+            if let Some(var) = ns.get_val(atm) {
+                return Ok(var);
             }
         }
 
-        if let Some(var) = self.globals.vars.get(sym) {
-            Ok(LispObj::clone(var))
+        if let Some(var) = self.globals.get_val(atm) {
+            Ok(var)
         } else {
-            Err(format!("No variable named {}", sym))
+            Err(format!("No variable named {}", self.atoms.stringify(atm)))
+        }
+    }
+
+    #[inline]
+    fn eval_sym_val(&self, sym: &Symbol) -> Result<LispObj, String> {
+        if let Some(var) = sym.get_val() {
+            Ok(var)
+        } else {
+            Err(format!("No variable named: {}", self.atoms.stringify(sym.name)))
         }
     }
 
@@ -524,7 +553,8 @@ impl Lsp {
     #[inline]
     pub fn eval_inner(&mut self, ast: &LispObj) -> Result<LispObj, String> {
         match ast {
-            &LispObj::Sym(ref s) => self.eval_sym(s),
+            &LispObj::Atm(a) => self.eval_atm_val(a),
+            &LispObj::Sym(ref s) => self.eval_sym_val(s),
             &LispObj::Sxp(ref sxp) => self.eval(sxp),
             &LispObj::Ref(ref iref) => self.eval_ref(iref),
             _ => Ok(ast.clone()),
@@ -548,14 +578,25 @@ impl Lsp {
     }
 
     #[inline]
-    fn eval_fn(&mut self, s: &str, args: &mut Iter<LispObj>) -> Result<LispObj, String> {
+    fn eval_fn(&mut self, fun: &LispObj, args: &mut Iter<LispObj>) -> Result<LispObj, String> {
         use std::borrow::Borrow;
 
-        if let Some(fun) = self.globals.funcs.get(s).cloned() {
-            self.apply(Rc::borrow(&fun), args)
-        } else {
-            Err(format!("Unrecognised function: {:?}", s))
-        }
+        let fun = match fun {
+            &LispObj::Lambda(ref lmbda) => lmbda,
+            &LispObj::ExtFun(ref extf) => Rc::borrow(extf) as &Func,
+            obj => return Err(format!("Not a function: {}", obj)),
+        };
+        self.apply(fun, args)
+    }
+
+    #[inline]
+    fn eval_atm_fn(&mut self, atm: Atom, args: &mut Iter<LispObj>) -> Result<LispObj, String> {
+        self.locals.iter().rev()
+            .map( |ns| ns.get_fun(atm) )
+            .find( |fun| fun.is_some() )
+            .unwrap_or_else( || self.globals.get_fun(atm) )
+            .map_or(Err(format!("Unrecognised function: {}", atm)),
+                    |fun| self.eval_fn(&fun, args) )
     }
 
     pub fn eval_primitive(&mut self, ast: &Sexp) -> Result<LispObj, String> {
@@ -576,12 +617,13 @@ impl Lsp {
 
         if let Some(first) = itr.next() {
             match first {
-                &LispObj::Sym(ref s) => self.eval_fn(s, &mut itr),
+                &LispObj::Atm(a) => self.eval_atm_fn(a, &mut itr),
                 &LispObj::Lambda(ref fun) => self.apply(fun, &mut itr),
                 &LispObj::Sxp(ref x) => match self.eval_primitive(x)? {
                     LispObj::Lambda(ref fun) => self.apply(fun, &mut itr),
                     sxp => Err(format!("Invalid as a function: {:?}", sxp)),
                 },
+                &LispObj::Sym(_) => Err(format!("Eval Symbol as func not implemented")),
                 _ => Err(format!("Invalid as a function: {:?}", first)),
             }
         } else {
@@ -592,7 +634,7 @@ impl Lsp {
     pub fn load(&mut self, name: &str) -> Result<LispObj, String> {
         let mut src = String::new();
         {
-            let lpaths = &self.globals.vars.get("load-path").unwrap().ref_val()?.borrow();
+            let lpaths = &self.globals.get_val(symbols::LOAD_PATH).unwrap();
             let lpaths = lpaths.sxp_val()?.lst.iter().map( |dir_path| -> &str {
                 if let &LispObj::Str(ref dir_path) = dir_path {
                     dir_path

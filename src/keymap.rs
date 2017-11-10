@@ -15,10 +15,12 @@
 
 use rselisp::{Lsp, LispObj, LispForm, Sexp};
 use rselisp::lambda::{Func, EvalOption};
+use rselisp::symbols::{Atom, AtomRegistry, Symbol};
 use editor::{Event, BasicEvent, EventModifiers};
 use fnv::FnvHashMap;
 use std::any::Any;
 use std::slice::Iter;
+use std::fmt;
 
 #[derive(Debug)]
 pub struct Keymap {
@@ -98,7 +100,7 @@ impl LispForm for Keymap {
     }
 
     fn to_lisp(&self) -> Result<LispObj, String> {
-        let mut sxp = Sexp::from(&[LispObj::sym("keymap")]);
+        let mut sxp = Sexp::from(&[LispObj::Str("keymap".to_owned())]);
 
         for (evt, act) in self.map.iter() {
             sxp.push(LispObj::pair(evt.to_lisp()?, act.clone()));
@@ -116,7 +118,6 @@ def_builtin! { "keymapp", KeymapBuiltin, Evaluated, _lsp, args; {
     if let Some(s) = args.next() {
         match s {
             &LispObj::Ext(ref ext) if Keymap::is_keymap(&*ext.borrow()) => Ok(LispObj::t()),
-            &LispObj::Sxp(ref sxp) if sxp.car() == LispObj::sym("keymap") => Ok(LispObj::t()),
             _ => Ok(LispObj::nil()),
         }
     } else {

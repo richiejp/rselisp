@@ -1,6 +1,6 @@
-#[macro_use]
 use super::*;
 use symbols::Atom;
+use std::fmt;
 
 /// Whether function arguments are self quoting or evaluated
 #[derive(Clone)]
@@ -10,7 +10,7 @@ pub enum EvalOption {
 }
 
 /// Something which can be called with arguments
-pub trait Func {
+pub trait Func: fmt::Debug {
     /// Return whether the arguments are evaluated
     fn eval_args(&self) -> EvalOption;
     /// The canonical name of this function
@@ -34,7 +34,7 @@ impl ArgSpec {
 
 impl fmt::Display for ArgSpec {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:?}", &self.name)
+        write!(f, "{}", &self.name)
     }
 }
 
@@ -96,16 +96,16 @@ impl UserFunc {
 
 impl Func for UserFunc {
     fn eval_args(&self) -> EvalOption { EvalOption::Evaluated }
-    fn name(&self) -> FuncName { FuncName::None }
+    fn name(&self) -> Atom { symbols::ANONYMOUS }
 
     fn call(&self, lsp: &mut Lsp, args: &mut Iter<LispObj>) -> Result<LispObj, String> {
         let mut ns = Namespace::new();
         for spec in self.args.iter() {
             if let Some(arg) = args.next() {
-                ns.reg_var(spec.name, arg);
+                ns.intern(Symbol::with_val(spec.name, arg.clone()));
             } else {
                 return Err(format!("'{}' expected '{}' argument",
-                                   &lsp.stringify(name), &lsp.stringify(spec.name)));
+                                   &lsp.stringify(self.name()), &lsp.stringify(spec.name)));
             }
         }
         lsp.locals.push(ns);
