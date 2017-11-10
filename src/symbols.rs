@@ -114,7 +114,7 @@ pub struct SymbolData {
 
 pub struct Symbol {
     pub name: Atom,
-    pub data: Rc<RefCell<SymbolData>>,
+    data: Rc<RefCell<SymbolData>>,
 }
 
 impl Symbol {
@@ -129,11 +129,11 @@ impl Symbol {
         }
     }
 
-    fn with_fun<F: 'static + Func>(name: Atom, fun: ) -> Symbol {
+    fn with_ext_fun<F: 'static + Func>(name: Atom, fun: F) -> Symbol {
         with_fun_obj(name, LispObj::ExtFun(fun))
     }
 
-    fn with_fun_obj(name: Atom, fun: LispObj) -> Symbol {
+    fn with_fun(name: Atom, fun: LispObj) -> Symbol {
         Symbol {
             name: name,
             data: Rc::new(RefCell::new(SymbolData {
@@ -159,15 +159,8 @@ impl Namespace {
         }
     }
 
-    pub fn reg_fn(&mut self, atom: Atom, fun: &LispObj) {
-        self.funcs.insert(atom, fun.clone())
-    }
-
-    pub fn reg_var(&mut self, name: Atom, var: &LispObj) {
-        self.syms.insert(name, match var {
-            &LispObj::Sxp(_) => LispObj::Ref(var.clone().into_ref()),
-            _ => var.clone(),
-        });
+    fn intern(&mut self, sym: Symbol) {
+        syms.insert(sym.name, sym);
     }
 }
 

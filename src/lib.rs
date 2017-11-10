@@ -389,7 +389,7 @@ impl Lsp {
         macro_rules! register_ext_funcs {
             ( $($builtin:ident),+ ) => { $(
                 let fun = $builtin::new(&mut ar);
-                g.reg_fn(fun.name(), LispObj::extern_fun(fun));
+                g.intern(Symbol::with_ext_fun(fun.name(), fun));
             ) }
         }
 
