@@ -58,12 +58,6 @@ macro_rules! def_builtin {
                        self.name)
             }
         }
-
-        impl fmt::Display for $rname {
-            fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-                write!(f, concat!("#<", stringify!($rname), ">"))
-            }
-        }
     )
 }
 
@@ -263,7 +257,7 @@ def_builtin! { "load", LoadBuiltin, Unevaluated, lsp, args; {
             &LispObj::Str(ref name) => {
                 lsp.load(name)
             },
-            thing => Err(format!("load expects a symbol or string not {}", thing))
+            thing => Err(lsp.error_print("load expects a symbol or string not", thing))
         }
     } else {
         Err(format!("load requires one argument"))

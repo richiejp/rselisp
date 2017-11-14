@@ -122,6 +122,7 @@ impl LispForm for Event {
 
 fn repl() {
     let mut lsp = Lsp::new();
+    let mut obuf = String::new();
 
     println!("'(rselisp repl v0.0 (C) 2017 Richard Palethorpe)");
 
@@ -132,7 +133,11 @@ fn repl() {
                 match lsp.read(&line) {
                     Ok(sexp) => match lsp.eval(&sexp) {
                         Ok(LispObj::Atm(symbols::EXIT)) => break,
-                        Ok(resexp) => println!("-> {}", resexp),
+                        Ok(obj) => {
+                            lsp.print(&mut obuf, &obj);
+                            println!("-> {}", obuf);
+                            obuf.clear();
+                        },
                         Err(e) => println!("EVAL ERROR: {}", e),
                     },
                     Err(e) => println!("READ ERROR: {}", e),

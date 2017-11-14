@@ -19,7 +19,7 @@ use std::slice::Iter;
 use std::iter::{Peekable, Iterator};
 use std::rc::Rc;
 use std::cell::RefCell;
-use std::fmt;
+use std::fmt::{self, Write};
 use std::any::Any;
 use std::fs::File;
 use std::path::Path;
@@ -215,30 +215,6 @@ impl std::cmp::PartialEq for LispObj {
     }
 }
 
-impl fmt::Display for LispObj {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            &LispObj::Int(i) => write!(f, "{}", i),
-            &LispObj::Str(ref s) => write!(f, "\"{}\"", s),
-            &LispObj::Atm(a) => write!(f, "{}", a),
-            &LispObj::Sym(ref s) => write!(f, "{:?}", s),
-            &LispObj::Sxp(ref sxp) => write!(f, "{}", sxp),
-            &LispObj::Lambda(ref fun) => write!(f, "{}", fun),
-            &LispObj::Ref(ref iref) => write!(f, "{}", &iref.borrow()),
-            &LispObj::Ext(ref ext) => {
-                let ext = ext.borrow();
-                match ext.to_lisp() {
-                    Ok(l) => write!(f, "{}", l),
-                    Err(_) => write!(f, "#<{}>", ext.rust_name())
-                }
-            },
-            &LispObj::ExtFun(ref fun) => {
-                write!(f, "{:?}", fun)
-            }
-        }
-    }
-}
-
 /// S-Expression, list or vector
 ///
 /// Usually a list in Lisp is a string of cons cells (linked-list). Here we
@@ -316,26 +292,6 @@ impl Sexp {
     }
 }
 
-fn fmt_iter<E, F>(brk: char, itr: &mut Iter<E>, f: &mut F) -> fmt::Result
-    where E: fmt::Display, F: fmt::Write
-{
-    if let Some(first) = itr.next() {
-        write!(f, "{}{}", brk, first)?;
-        for elt in itr {
-            write!(f, " {}", elt)?;
-        }
-        write!(f, "{}", Lsp::inv_brk(brk))
-    } else {
-        write!(f, "nil")
-    }
-}
-
-impl fmt::Display for Sexp {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-            fmt_iter('(', &mut self.lst.iter(), f)
-    }
-}
-
 /// Types which can be converted to and from Lisp
 pub trait LispForm: fmt::Debug {
     fn rust_name(&self) -> &'static str;
@@ -360,7 +316,7 @@ pub trait LispForm: fmt::Debug {
 /// Lisp and Rust.
 #[macro_export]
 macro_rules! with_downcast {
-    ($value:ident, $as:ident; $do:block) => (
+    ($lsp:expr, $value:ident, $as:ident; $do:block) => (
         if let &LispObj::Ext(ref ext) = $value {
             let ext = &mut *ext.borrow_mut();
             let lname = ext.lisp_name();
@@ -372,7 +328,7 @@ macro_rules! with_downcast {
                 Err(format!("Downcast did not expect {} ({})", lname, rname))
             }
         } else {
-            Err(format!("Only external objects can be downcast, not: {}", $value))
+            Err($lsp.error_print("Only external objects can be downcast, not", $value))
         }
     )
 }
@@ -527,14 +483,15 @@ impl Lsp {
         }
     }
 
-    pub fn print<O: fmt::Write>(&self, stream: &mut O, ast: &LispObj) -> fmt::Result {
+    pub fn print<O: Write>(&self, stream: &mut O, ast: &LispObj) -> fmt::Result {
         match ast {
             &LispObj::Int(i) => write!(stream, "{}", i),
             &LispObj::Str(ref s) => write!(stream, "\"{}\"", s),
             &LispObj::Atm(a) => write!(stream, "{}", self.stringify(a)),
             &LispObj::Sym(ref s) => write!(stream, "{}", self.stringify(s.name)),
             &LispObj::Sxp(ref sxp) => self.print_sxp(stream, sxp),
-            &LispObj::Lambda(ref fun) => write!(stream, "{}", fun),
+            &LispObj::Lambda(ref fun) =>
+                write!(stream, "#<lambda/{}>", self.stringify(fun.name())),
             &LispObj::Ref(ref iref) => self.print(stream, &iref.borrow()),
             &LispObj::Ext(ref ext) => {
                 let ext = ext.borrow();
@@ -543,13 +500,12 @@ impl Lsp {
                     Err(_) => write!(stream, "#<{}>", ext.rust_name())
                 }
             },
-            &LispObj::ExtFun(ref fun) => {
-                write!(stream, "{}", fun)
-            }
+            &LispObj::ExtFun(ref fun) =>
+                write!(stream, "#<extfunc/{}>", self.stringify(fun.name())),
         }
     }
 
-    pub fn print_sxp<O: fmt::Write>(&self, stream: &mut O, ast: &Sexp) -> fmt::Result {
+    pub fn print_sxp<O: Write>(&self, stream: &mut O, ast: &Sexp) -> fmt::Result {
         let mut itr = ast.lst.iter().peekable();
 
         if let None = itr.peek() {
@@ -562,7 +518,7 @@ impl Lsp {
     }
 
     pub fn print_itr<'a, O, T>(&self, stream: &mut O, mut itr: Peekable<T>) -> fmt::Result
-        where O: fmt::Write, T: Iterator<Item=&'a LispObj>
+        where O: Write, T: Iterator<Item=&'a LispObj>
     {
         while let Some(obj) = itr.next() {
             self.print(stream, obj)?;
@@ -571,6 +527,13 @@ impl Lsp {
             }
         }
         Ok(())
+    }
+
+    pub fn error_print(&self, msg: &str, obj: &LispObj) -> String {
+        let mut s = String::new();
+        write!(s, "{}: ", msg);
+        self.print(&mut s, obj);
+        s
     }
 
     #[inline]
@@ -642,7 +605,7 @@ impl Lsp {
             &LispObj::Lambda(ref lmbda) => self.apply(lmbda, args),
             &LispObj::ExtFun(ref extf) => self.apply(Rc::borrow(extf) as &Func, args),
             &LispObj::Sxp(ref x) => self.eval_primitive(x, args),
-            obj => Err(format!("Expected function but got: {}", obj)),
+            obj => Err(self.error_print("Invalid as a function", obj)),
         }
     }
 
@@ -652,7 +615,7 @@ impl Lsp {
             .map( |ns| ns.get_fun(atm) )
             .find( |fun| fun.is_some() )
             .unwrap_or_else( || self.globals.get_fun(atm) )
-            .map_or(Err(format!("Unrecognised function: {}", atm)),
+            .map_or(Err(format!("Unrecognised function: {}", self.stringify(atm))),
                     |fun| self.eval_fn(&fun, args) )
     }
 
@@ -668,7 +631,7 @@ impl Lsp {
                     .ok_or(format!("Macro form should be ((macro . lambda) args..)"))
                     .and_then( |obj| self.eval_fn(obj, args) )
                     .and_then( |obj| self.eval_inner(&obj) ),
-                obj => Err(format!("Expected lambda or macro, but got: {}", obj)),
+                obj => Err(self.error_print("Expected lambda or macro, but got", obj)),
             }
         })
     }
@@ -682,7 +645,7 @@ impl Lsp {
                 &LispObj::Lambda(ref fun) => self.apply(fun, &mut itr),
                 &LispObj::Sxp(ref x) => self.eval_primitive(x, &mut itr),
                 &LispObj::Sym(_) => Err(format!("Eval Symbol as func not implemented")),
-                _ => Err(format!("Invalid as a function: {:?}", first)),
+                _ => Err(self.error_print("Invalid as a function", first)),
             }
         } else {
             Ok(LispObj::nil())

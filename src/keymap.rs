@@ -125,11 +125,11 @@ def_builtin! { "keymapp", KeymapBuiltin, Evaluated, _lsp, args; {
     }
 }}
 
-def_builtin! { "define-key", DefineKeyBuiltin, Evaluated, _lsp, args; {
+def_builtin! { "define-key", DefineKeyBuiltin, Evaluated, lsp, args; {
     if let (Some(keymap), Some(evt), Some(act)) = take3!(args) {
-        Ok(with_downcast!(keymap, Keymap; {
+        Ok(with_downcast!(lsp, keymap, Keymap; {
             let evt = match evt {
-                &LispObj::Ext(_) => with_downcast!(evt, Event; { evt.clone() } )?,
+                &LispObj::Ext(_) => with_downcast!(lsp, evt, Event; { evt.clone() } )?,
                 &LispObj::Str(ref s) => keymap.parse_key(s)?,
                 _ => return Err(format!("Expected event string or external Event type")),
             };
