@@ -18,22 +18,21 @@ Not much is currently possible, but here is some example I/O:
 -> fib
 (fib 10)
 -> 89
-(fset 'fibs '(lambda (a) (if (eq a 0) nil (progn (print (fib a)) (fibs (- a 1
-)))))
+(fset 'fibs '(lambda (a) (if (eq a 0) nil (progn (print (fib a)) (fibs (- a 1)))))
 -> fibs
 (fibs 10)
-(89)
-(55)
-(34)
-(21)
-(13)
-(8)
-(5)
-(3)
-(2)
-(1)
+89
+55
+34
+21
+13
+8
+5
+3
+2
+1
 -> nil
-(exit)
+'exit
 '(Good bye!)
 ```
 
