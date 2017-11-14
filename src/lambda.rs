@@ -70,7 +70,7 @@ impl UserFunc {
         }
     }
 
-    pub fn lambda(args: &mut Iter<LispObj>) -> Result<LispObj, String> {
+    pub fn lambda(args: &mut Iter<LispObj>) -> Result<UserFunc, String> {
         match take2!(args) {
             (Some(&LispObj::Sxp(ref args_sxp)), Some(body)) => {
                 let largs: Result<Vec<ArgSpec>, String> = args_sxp.lst.iter().map(
@@ -82,12 +82,11 @@ impl UserFunc {
                     }
                 ).collect();
 
-                Ok(LispObj::Lambda(
-                    UserFunc::new(largs?, match body {
+                Ok(UserFunc::new(largs?, match body {
                         &LispObj::Ref(ref iref) => iref.clone(),
                         _ => body.clone().into_ref(),
                     })
-                ))
+                )
             },
             _ => Err(format!("(lambda ([args]) [body])")),
         }

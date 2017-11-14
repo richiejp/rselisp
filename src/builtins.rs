@@ -185,7 +185,11 @@ def_builtin! { "cons", ConsBuiltin, Evaluated, _lsp, args; {
     if let (Some(car), Some(cdr)) = take2!(args) {
         let mut sxp = Sexp::new('(');
         sxp.push(car.clone());
-        sxp.push(cdr.clone());
+        match cdr {
+            &LispObj::Sxp(ref s) => sxp.extend(s),
+            &LispObj::Atm(symbols::NIL) => (),
+            obj => sxp.push(obj.clone()),
+        };
         Ok(LispObj::Sxp(sxp))
     } else {
         Err(format!("cons requires two arguments"))

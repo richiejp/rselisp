@@ -305,6 +305,10 @@ impl Sexp {
         }
     }
 
+    pub fn extend(&mut self, other: &Sexp) {
+        self.lst.extend(other.lst.iter().cloned());
+    }
+
     fn new_inner_sxp(&mut self, delim: char) -> &mut Sexp {
         self.lst.push(LispObj::Sxp(Sexp::new(delim)));
         self.lst.last_mut().unwrap().ref_sxp()
@@ -586,21 +590,13 @@ impl Lsp {
     #[inline]
     fn eval_fn(&mut self, fun: &LispObj, args: &mut Iter<LispObj>) -> Result<LispObj, String> {
         use std::borrow::Borrow;
-        let prim_res;
 
-        let fun = match fun {
-            &LispObj::Lambda(ref lmbda) => lmbda,
-            &LispObj::ExtFun(ref extf) => Rc::borrow(extf) as &Func,
-            &LispObj::Sxp(ref x) => {
-                prim_res = self.eval_primitive(x)?;
-                match prim_res {
-                    LispObj::Lambda(ref lmbda) => lmbda,
-                    obj => return Err(format!("Invalid as a function: {}", obj)),
-                }
-            },
-            obj => return Err(format!("Not a function: {}", obj)),
-        };
-        self.apply(fun, args)
+        match fun {
+            &LispObj::Lambda(ref lmbda) => self.apply(lmbda, args),
+            &LispObj::ExtFun(ref extf) => self.apply(Rc::borrow(extf) as &Func, args),
+            &LispObj::Sxp(ref x) => self.eval_primitive(x, args),
+            obj => Err(format!("Expected function but got: {}", obj)),
+        }
     }
 
     #[inline]
@@ -613,17 +609,21 @@ impl Lsp {
                     |fun| self.eval_fn(&fun, args) )
     }
 
-    pub fn eval_primitive(&mut self, ast: &Sexp) -> Result<LispObj, String> {
+    pub fn eval_primitive(&mut self, ast: &Sexp, args: &mut Iter<LispObj>)
+                          -> Result<LispObj, String> {
         let mut itr = ast.lst.iter();
 
-        if let Some(name) = itr.next() {
+        itr.next().ok_or(format!("nil is not a function")).and_then( |name| {
             match name {
-                &LispObj::Atm(symbols::LAMBDA) => UserFunc::lambda(&mut itr),
-                obj => Ok(obj.clone()),
+                &LispObj::Atm(symbols::LAMBDA) => UserFunc::lambda(&mut itr)
+                    .and_then( |l| self.apply(&l, args) ),
+                &LispObj::Atm(symbols::MACRO) => itr.next()
+                    .ok_or(format!("Macro form should be ((macro . lambda) args..)"))
+                    .and_then( |obj| self.eval_fn(obj, args) )
+                    .and_then( |obj| self.eval_inner(&obj) ),
+                obj => Err(format!("Expected lambda or macro, but got: {}", obj)),
             }
-        } else {
-            Ok(LispObj::nil())
-        }
+        })
     }
 
     pub fn eval(&mut self, ast: &Sexp) -> Result<LispObj, String> {
@@ -633,10 +633,7 @@ impl Lsp {
             match first {
                 &LispObj::Atm(a) => self.eval_atm_fn(a, &mut itr),
                 &LispObj::Lambda(ref fun) => self.apply(fun, &mut itr),
-                &LispObj::Sxp(ref x) => match self.eval_primitive(x)? {
-                    LispObj::Lambda(ref fun) => self.apply(fun, &mut itr),
-                    sxp => Err(format!("Invalid as a function: {:?}", sxp)),
-                },
+                &LispObj::Sxp(ref x) => self.eval_primitive(x, &mut itr),
                 &LispObj::Sym(_) => Err(format!("Eval Symbol as func not implemented")),
                 _ => Err(format!("Invalid as a function: {:?}", first)),
             }
@@ -738,5 +735,24 @@ mod tests {
 
         let ast = &lsp.read(&src).unwrap();
         assert_eq!(lsp.eval(ast), Ok(LispObj::Int(3)));
+    }
+
+    #[test]
+    fn macro_primitive() {
+        let mut lsp = Lsp::new();
+        let src = "((macro (lambda (a b) (cons '+ (cons a b)))) 1 2)".to_owned();
+
+        let ast = &lsp.read(&src).unwrap();
+        assert_eq!(lsp.eval(ast), Ok(LispObj::Int(3)));
+    }
+
+    #[test]
+    fn cons_list() {
+        let mut lsp = Lsp::new();
+        let src = "(cons 1 (cons 2 (cons 3 nil)))".to_owned();
+
+        let ast = &lsp.read(&src).unwrap();
+        assert_eq!(lsp.eval(ast),
+                   Ok(LispObj::list_from(&[LispObj::Int(1), LispObj::Int(2), LispObj::Int(3)])));
     }
 }

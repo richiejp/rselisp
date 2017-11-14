@@ -175,7 +175,10 @@ impl Buffer {
             }
         }
 
-        push_frag!();
+        if frag.height == 0 {
+            frag.height = dfont.height + 1;
+        }
+        frags.push(frag.clone());
 
         Content {
             text: text,

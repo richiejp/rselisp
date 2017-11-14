@@ -15,7 +15,7 @@
 
 use rselisp::{Lsp, LispObj, LispForm, Sexp};
 use rselisp::lambda::{Func, EvalOption};
-use rselisp::symbols::{Atom, AtomRegistry, Symbol};
+use rselisp::symbols::{Atom, AtomRegistry};
 use editor::{Event, BasicEvent, EventModifiers};
 use fnv::FnvHashMap;
 use std::any::Any;

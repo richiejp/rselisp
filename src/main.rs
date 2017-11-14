@@ -178,8 +178,8 @@ fn editor() {
         frame.start();
     });
     let bufcell = Rc::new(RefCell::new(Buffer::new()));
-    let echo_bufcell = Rc::new(RefCell::new(Buffer::new()));
-    let mini_bufcell = Rc::new(RefCell::new(Buffer::new()));
+    //let echo_bufcell = Rc::new(RefCell::new(Buffer::new()));
+    //let mini_bufcell = Rc::new(RefCell::new(Buffer::new()));
     let mut cbuf = String::with_capacity(4);
     let mut cursor = 0;
     let global_keymapcell = Rc::new(RefCell::new(Keymap::new()));
