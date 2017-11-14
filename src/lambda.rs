@@ -10,7 +10,7 @@ pub enum EvalOption {
 }
 
 /// Something which can be called with arguments
-pub trait Func: fmt::Debug {
+pub trait Func: fmt::Debug + fmt::Display {
     /// Return whether the arguments are evaluated
     fn eval_args(&self) -> EvalOption;
     /// The canonical name of this function
@@ -50,7 +50,7 @@ impl std::ops::Deref for ArgSpecs {
 }
 
 impl fmt::Display for ArgSpecs {
-fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         fmt_iter('[', &mut self.iter(), f)
     }
 }
@@ -116,6 +116,6 @@ impl Func for UserFunc {
 
 impl fmt::Display for UserFunc {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "('{} . (lambda {} {}))", &self.name(), &self.args, LispObj::Ref(self.body.clone()))
+        write!(f, "(lambda {} {})", &self.args, LispObj::Ref(self.body.clone()))
     }
 }

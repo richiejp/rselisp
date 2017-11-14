@@ -16,6 +16,7 @@
 extern crate fnv;
 
 use std::slice::Iter;
+use std::iter::{Peekable, Iterator};
 use std::rc::Rc;
 use std::cell::RefCell;
 use std::fmt;
@@ -526,6 +527,52 @@ impl Lsp {
         }
     }
 
+    pub fn print<O: fmt::Write>(&self, stream: &mut O, ast: &LispObj) -> fmt::Result {
+        match ast {
+            &LispObj::Int(i) => write!(stream, "{}", i),
+            &LispObj::Str(ref s) => write!(stream, "\"{}\"", s),
+            &LispObj::Atm(a) => write!(stream, "{}", self.stringify(a)),
+            &LispObj::Sym(ref s) => write!(stream, "{}", self.stringify(s.name)),
+            &LispObj::Sxp(ref sxp) => self.print_sxp(stream, sxp),
+            &LispObj::Lambda(ref fun) => write!(stream, "{}", fun),
+            &LispObj::Ref(ref iref) => self.print(stream, &iref.borrow()),
+            &LispObj::Ext(ref ext) => {
+                let ext = ext.borrow();
+                match ext.to_lisp() {
+                    Ok(l) => self.print(stream, &l),
+                    Err(_) => write!(stream, "#<{}>", ext.rust_name())
+                }
+            },
+            &LispObj::ExtFun(ref fun) => {
+                write!(stream, "{}", fun)
+            }
+        }
+    }
+
+    pub fn print_sxp<O: fmt::Write>(&self, stream: &mut O, ast: &Sexp) -> fmt::Result {
+        let mut itr = ast.lst.iter().peekable();
+
+        if let None = itr.peek() {
+            return write!(stream, "nil");
+        }
+
+        write!(stream, "(")?;
+        self.print_itr(stream, itr);
+        write!(stream, ")")
+    }
+
+    pub fn print_itr<'a, O, T>(&self, stream: &mut O, mut itr: Peekable<T>) -> fmt::Result
+        where O: fmt::Write, T: Iterator<Item=&'a LispObj>
+    {
+        while let Some(obj) = itr.next() {
+            self.print(stream, obj)?;
+            if let Some(_) = itr.peek() {
+                write!(stream, " ")?;
+            }
+        }
+        Ok(())
+    }
+
     #[inline]
     fn eval_atm_val(&self, atm: Atom) -> Result<LispObj, String> {
         match atm {
@@ -754,5 +801,16 @@ mod tests {
         let ast = &lsp.read(&src).unwrap();
         assert_eq!(lsp.eval(ast),
                    Ok(LispObj::list_from(&[LispObj::Int(1), LispObj::Int(2), LispObj::Int(3)])));
+    }
+
+    #[test]
+    fn print() {
+        let mut lsp = Lsp::new();
+        let src = "(a b (c))";
+        let mut out = String::with_capacity(10);
+
+        let ast = &lsp.read(&src.to_owned()).unwrap();
+        assert!(lsp.print_sxp(&mut out, ast).is_ok());
+        assert_eq!(out, format!("(progn {})", src));
     }
 }

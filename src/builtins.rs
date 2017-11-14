@@ -58,6 +58,12 @@ macro_rules! def_builtin {
                        self.name)
             }
         }
+
+        impl fmt::Display for $rname {
+            fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                write!(f, concat!("#<", stringify!($rname), ">"))
+            }
+        }
     )
 }
 
@@ -123,9 +129,9 @@ def_builtin! { "interactive", InteractiveBuiltin, Unevaluated, _lsp, _args; {
     Ok(LispObj::nil())
 }}
 
-def_builtin! { "print", PrintBuiltin, Evaluated, _lsp, args; {
+def_builtin! { "print", PrintBuiltin, Evaluated, lsp, args; {
     let mut s = String::new();
-    let _res = fmt_iter('(', args, &mut s);
+    lsp.print_itr(&mut s, args.peekable());
     println!("{}", &s);
     Ok(LispObj::Str(s))
 }}
