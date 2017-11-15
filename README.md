@@ -69,8 +69,9 @@ want to fundamentally rewrite each basic component in the editor until it
 provides a solid foundation to implement the built-ins required by a
 non-trivial Emacs package.
 
-More specifically I am currently trying to rewrite the Lisp interpreter
-because it is too flawed to allow the editor components to pogress nicely.
+More specifically I am currently trying to implement just enough editor
+features to read and write to a file, execute commands in the echo buffer
+(i.e. M-x) and maybe get the scratch buffer working.
 
 Beyond personal entertainment and education, the reasons for wanting to
 rewrite Emacs in Rust are pretty much the same as for any other C/C++ project

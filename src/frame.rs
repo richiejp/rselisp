@@ -31,6 +31,8 @@ pub struct OrbFrame {
 
 const FG_COLOUR: Color = Color::rgb(0xbd, 0xc3, 0xce);
 const BG_COLOUR: Color = Color::rgb(0x2a, 0x2f, 0x38);
+const CUR_FG_COLOUR: Color = BG_COLOUR;
+const CUR_BG_COLOUR: Color = Color::rgb(0xe1, 0xcb, 0x8c);
 
 impl OrbFrame {
     pub fn new(send: Sender<UserEvent>, recv: Receiver<FrameCmd>) -> OrbFrame {
@@ -75,10 +77,19 @@ impl OrbFrame {
         let mut v = y;
 
         for frag in stuff.frags {
+            let fg = match frag.style {
+                Style::Default => FG_COLOUR,
+                Style::Cursor => {
+                    win.rect(u as i32, v as i32,
+                             frag.width as u32, frag.height as u32, CUR_BG_COLOUR);
+                    CUR_FG_COLOUR
+                },
+            };
+
             if let FragmentText::Indx { start: s, end: e, font: f } = frag.text {
                 let chr_width = fonts.get(f as usize).width;
                 for (i, chr) in stuff.text[s as usize .. e as usize].chars().enumerate() {
-                    win.char(u as i32 + chr_width as i32 * i as i32, v as i32, chr, FG_COLOUR);
+                    win.char(u as i32 + chr_width as i32 * i as i32, v as i32, chr, fg);
                 }
             }
 

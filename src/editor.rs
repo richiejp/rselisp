@@ -72,11 +72,18 @@ pub enum Layout {
 }
 
 #[derive(Clone, Debug)]
+pub enum Style {
+    Default,
+    Cursor,
+}
+
+#[derive(Clone, Debug)]
 pub struct Fragment {
     pub text: FragmentText,
     pub width: u16,
     pub height: u16,
     pub layout: Layout,
+    pub style: Style,
 }
 
 impl Fragment {
@@ -86,6 +93,7 @@ impl Fragment {
             width: 0,
             height: 0,
             layout: Layout::Flow,
+            style: Style::Default,
         }
     }
 }
@@ -255,6 +263,35 @@ pub enum ComResult {
     Quit,
 }
 
+/// The blinky thing which text comes out of
+#[derive(Clone, Copy, Debug)]
+pub struct Cursor {
+    //mark: usize,
+    //scroll: usize,
+    index: usize,
+}
+
+impl Cursor {
+    fn new() -> Cursor {
+        Cursor {
+            //scroll: 0,
+            index: 0,
+        }
+    }
+
+    pub fn index(&self) -> usize {
+        self.index
+    }
+
+    fn mov(&mut self, n: isize) {
+        if n > 0 {
+            self.index += n as usize;
+        } else {
+            self.index -= n.abs() as usize;
+        }
+    }
+}
+
 pub fn start() {
     let (frm_cmd_send, frm_cmd_recv) = channel::<FrameCmd>();
     let (frm_evt_send, frm_evt_recv) = channel::<UserEvent>();
@@ -266,7 +303,7 @@ pub fn start() {
     //let echo_bufcell = Rc::new(RefCell::new(Buffer::new()));
     //let mini_bufcell = Rc::new(RefCell::new(Buffer::new()));
     let mut cbuf = String::with_capacity(4);
-    let mut cursor = 0;
+    let mut cursor = Cursor::new();
     let global_keymapcell = Rc::new(RefCell::new(Keymap::new()));
     let mut lsp = Lsp::new();
 
@@ -279,6 +316,10 @@ pub fn start() {
     }
 
     frm_cmd_send.send(FrameCmd::Show).unwrap();
+    {
+        let buf = &*bufcell.borrow();
+        frm_cmd_send.send(FrameCmd::Update(buf.layout(cursor))).unwrap();
+    }
 
     while let Ok(evt) = frm_evt_recv.recv() {
         println!("RECEIVED EVENT: {:?}", evt);
@@ -306,10 +347,10 @@ pub fn start() {
                     match kevt {
                         Event { basic: BasicEvent::Char(c), modifiers: _ } => {
                             cbuf.push(c);
-                            buf.insert(cursor, &cbuf);
+                            buf.insert(&cursor, &cbuf);
                             cbuf.pop();
-                            frm_cmd_send.send(FrameCmd::Update(buf.layout())).unwrap();
-                            cursor += 1;
+                            cursor.mov(1);
+                            frm_cmd_send.send(FrameCmd::Update(buf.layout(cursor))).unwrap();
                         },
                         bevt => println!("Unhandled {:?}", bevt),
                     }

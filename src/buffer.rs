@@ -92,7 +92,8 @@ impl Buffer {
         self.gap_buf.len() - self.gap_len
     }
 
-    pub fn insert(&mut self, indx: usize, text: &str) {
+    pub fn insert(&mut self, cur: &Cursor, text: &str) {
+        let indx = cur.index();
         debug_assert!(indx <= self.len());
         if indx != self.gap_indx {
             unsafe { self.mov_gap(indx); }
@@ -126,7 +127,7 @@ impl Buffer {
             .chain(self.gap_buf.chars().skip(self.gap_indx + self.gap_len))
     }
 
-    pub fn layout(&self) -> Content {
+    pub fn layout(&self, cur: Cursor) -> Content {
         let mut text = String::new();
         let mut itr = self.chars();
         let mut frag = Fragment::new();
@@ -140,7 +141,7 @@ impl Buffer {
                 if frag.height == 0 {
                     frag.height = dfont.height + 1;
                 }
-                frags.push(frag.clone());
+                frags.push(frag);
                 frag = Fragment::new();
             }
         }
@@ -156,27 +157,45 @@ impl Buffer {
                     push_frag!();
                 },
                 c => {
-                    match frag.text {
-                        FragmentText::None => frag.text = FragmentText::Indx {
+                    if indx == cur.index() as u16 {
+                        push_frag!();
+                        frag.text = FragmentText::Indx {
                             start: indx,
                             end: indx + 1,
                             font: 0,
-                        },
-                        FragmentText::Indx { start: _, end: ref mut e, font: _ } => {
-                            *e += 1;
-                        },
+                        };
+                        frag.style = Style::Cursor;
+                        frag.width += dfont.width;
+                        text.push(c);
+                        push_frag!();
+                    } else {
+                        match frag.text {
+                            FragmentText::None => frag.text = FragmentText::Indx {
+                                start: indx,
+                                end: indx + 1,
+                                font: 0,
+                            },
+                            FragmentText::Indx { start: _, end: ref mut e, font: _ } => {
+                                *e += 1;
+                            },
+                        }
+                        frag.width += dfont.width;
+                        text.push(c);
                     }
-                    frag.width += dfont.width;
-                    text.push(c);
                     indx += 1;
                 }
             }
         }
 
+        if cur.index() as u16 >= indx {
+            push_frag!();
+            frag.style = Style::Cursor;
+            frag.width = dfont.width;
+        }
         if frag.height == 0 {
             frag.height = dfont.height + 1;
         }
-        frags.push(frag.clone());
+        frags.push(frag);
 
         Content {
             text: text,
