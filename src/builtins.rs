@@ -23,6 +23,7 @@ macro_rules! def_builtin {
         }
 
         impl $rname {
+            #[allow(dead_code)]
             pub fn new_ar(atoms: &mut AtomRegistry) -> $rname {
                 $rname {
                     name: atoms.atomize($name),

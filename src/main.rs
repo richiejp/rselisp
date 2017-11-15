@@ -30,12 +30,17 @@ extern crate orbclient;
 #[macro_use]
 extern crate rselisp;
 use rselisp::{Lsp, LispObj, Sexp, LispForm, External};
-use rselisp::symbols;
-use rselisp::symbols::Symbol;
+use rselisp::symbols::{self, Symbol};
 use rselisp::lambda::Func;
 
 mod editor;
-use editor::{Buffer, Frame, OrbFrame, FrameCmd, Event, UserEvent, BasicEvent, EventModifiers};
+use editor::{Event, UserEvent, BasicEvent, EventModifiers};
+
+mod buffer;
+use buffer::Buffer;
+
+mod frame;
+use frame::{Frame, OrbFrame, FrameCmd};
 
 mod keymap;
 use keymap::{Keymap, KeymapBuiltin, DefineKeyBuiltin};
@@ -134,7 +139,7 @@ fn repl() {
                     Ok(sexp) => match lsp.eval(&sexp) {
                         Ok(LispObj::Atm(symbols::EXIT)) => break,
                         Ok(obj) => {
-                            lsp.print(&mut obuf, &obj);
+                            let _res = lsp.print(&mut obuf, &obj);
                             println!("-> {}", obuf);
                             obuf.clear();
                         },
