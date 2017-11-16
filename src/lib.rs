@@ -92,7 +92,7 @@ pub type ExternalFun = Rc<Func>;
 
 macro_rules! gen_to_vals {
     ( $( $fn:ident, $inner:ident, $type:ident );+ ) => ($(
-        fn $fn(&self) -> Result<&$type, String> {
+        pub fn $fn(&self) -> Result<&$type, String> {
             if let &LispObj::$inner(ref val) = self {
                 Ok(val)
             } else {
@@ -325,7 +325,9 @@ macro_rules! with_downcast {
             if let Some($value) = ext.as_any().downcast_mut::<$as>() {
                 Ok($do)
             } else {
-                Err(format!("Downcast did not expect {} ({})", lname, rname))
+                Err(format!(
+                    concat!("Downcast expected ", stringify!($as), " not {} ({})"),
+                    lname, rname))
             }
         } else {
             Err($lsp.error_print("Only external objects can be downcast, not", $value))

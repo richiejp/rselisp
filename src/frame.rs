@@ -1,8 +1,11 @@
+use std::any::Any;
 use std::borrow::Borrow;
-use std::{time, thread};
-use std::sync::mpsc::{Sender, Receiver, TryRecvError};
+use std::{fmt, time, thread};
+use std::sync::mpsc::{Sender, Receiver, SendError, RecvError, TryRecvError};
 use std::sync::RwLock;
 use orbclient::{self, Window, Renderer, EventOption, WindowFlag, Color};
+
+use rselisp::LispForm;
 
 use editor::*;
 
@@ -21,6 +24,57 @@ pub enum FrameCmd {
     Update(Content),
     Quit,
 }
+
+pub struct FrameProxy {
+    recv: Receiver<UserEvent>,
+    send: Sender<FrameCmd>,
+}
+
+impl FrameProxy {
+    pub fn new(send: Sender<FrameCmd>, recv: Receiver<UserEvent>) -> FrameProxy {
+        FrameProxy {
+            recv: recv,
+            send: send,
+        }
+    }
+
+    pub fn show(&self) -> Result<(), SendError<FrameCmd>> {
+        self.send.send(FrameCmd::Show)
+    }
+
+    pub fn update(&self, cont: Content) -> Result<(), SendError<FrameCmd>> {
+        self.send.send(FrameCmd::Update(cont))
+    }
+
+    pub fn quit(&self) -> Result<(), SendError<FrameCmd>> {
+        self.send.send(FrameCmd::Quit)
+    }
+
+    pub fn listen(&self) -> Result<UserEvent, RecvError> {
+        self.recv.recv()
+    }
+}
+
+impl LispForm for FrameProxy {
+    fn rust_name(&self) -> &'static str {
+        "frame::FrameProxy"
+    }
+
+    fn lisp_name(&self) -> &'static str {
+        "frame"
+    }
+
+    fn as_any(&mut self) -> &mut Any {
+        self
+    }
+}
+
+impl fmt::Debug for FrameProxy {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "FrameProxy {{ ... }}")
+    }
+}
+
 
 pub struct OrbFrame {
     recv: Receiver<FrameCmd>,

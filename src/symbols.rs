@@ -24,7 +24,9 @@ macro_rules! gen_const_atoms {
 
 // Must be in same order as atomize_const_atoms! below
 gen_const_atoms! {
-    NIL, T, LAMBDA, MACRO, ANONYMOUS, QUOTE, EXIT, LOAD_PATH, KEYMAP
+    NIL, T, LAMBDA, MACRO, ANONYMOUS, QUOTE, EXIT, LOAD_PATH,
+
+    KEYMAP, CURRENT_BUFFER, CURRENT_CURSOR, CURRENT_FRAME, A
 }
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
@@ -45,7 +47,7 @@ pub struct AtomRegistry {
 
 impl AtomRegistry {
     pub fn with_capacity(capacity: usize) -> AtomRegistry {
-        let cap = capacity + 3;
+        let cap = capacity + 12;
         let mut me = AtomRegistry {
             table: Vec::with_capacity(cap),
             rev_table: FnvHashMap::with_capacity_and_hasher(cap, Default::default()),
@@ -60,7 +62,8 @@ impl AtomRegistry {
         // Must be in the same order as gen_const_atoms! above
         atomize_const_atoms!(
             "nil", "t", "lambda", "macro", "#<anonymous>", "quote", "exit", "load-path",
-            "keymap"
+
+            "keymap", "current-buffer", "current-cursor", "current-frame", "a"
         );
         me
     }
@@ -256,5 +259,23 @@ mod tests {
         assert!(reg.atomize(s) == u);
         assert!(u != v);
         assert!(reg.stringify(u) != reg.stringify(v));
+    }
+
+    #[test]
+    fn different_atoms2() {
+        let s = "current-frame";
+        let t = "current-cursor";
+        let mut reg = AtomRegistry::with_capacity(2);
+
+        let u = reg.atomize(s);
+        let v = reg.atomize(t);
+        assert!(reg.stringify(v) == t);
+        assert!(reg.stringify(u) == s);
+        assert!(reg.atomize(t) == v);
+        assert!(reg.atomize(s) == u);
+        assert!(u != v);
+        assert!(reg.stringify(u) != reg.stringify(v));
+        assert_eq!(u, CURRENT_FRAME);
+        assert_eq!(v, CURRENT_CURSOR);
     }
 }

@@ -1,18 +1,19 @@
 use std::fmt;
 use std::sync::{Arc, RwLock};
-use std::sync::mpsc::channel;
+use std::sync::mpsc::{self, channel};
 use std::thread;
 use fnv::FnvHashMap;
 use std::rc::Rc;
 use std::cell::RefCell;
 use std::any::Any;
+use std::slice::Iter;
 
 use rselisp::{Lsp, LispObj, Sexp, LispForm, External};
-use rselisp::symbols::{self, Symbol};
-use rselisp::lambda::Func;
+use rselisp::symbols::{self, Symbol, Atom, AtomRegistry};
+use rselisp::lambda::{Func, EvalOption};
 
-use frame::{Frame, OrbFrame, FrameCmd};
-use buffer::Buffer;
+use frame::{Frame, FrameProxy, OrbFrame, FrameCmd};
+use buffer::{Buffer};
 use keymap::{Keymap, KeymapBuiltin, DefineKeyBuiltin};
 
 pub struct Font {
@@ -264,16 +265,23 @@ pub enum ComResult {
 }
 
 /// The blinky thing which text comes out of
-#[derive(Clone, Copy, Debug)]
+///
+/// Actually this represents a many-to-many relation between Buffers and
+/// Frames.
+#[derive(Clone)]
 pub struct Cursor {
+    buffer: Rc<RefCell<Buffer>>,
+    frame: Rc<RefCell<FrameProxy>>,
     //mark: usize,
     //scroll: usize,
     index: usize,
 }
 
 impl Cursor {
-    fn new() -> Cursor {
+    fn new(buffer: Rc<RefCell<Buffer>>, frame: Rc<RefCell<FrameProxy>>) -> Cursor {
         Cursor {
+            buffer: buffer,
+            frame: frame,
             //scroll: 0,
             index: 0,
         }
@@ -283,14 +291,63 @@ impl Cursor {
         self.index
     }
 
-    fn mov(&mut self, n: isize) {
+    pub fn mov(&mut self, n: isize) -> Result<(), mpsc::SendError<FrameCmd>> {
+        let buf = &mut *self.buffer.borrow_mut();
+        let frm = &*self.frame.borrow();
+
         if n > 0 {
             self.index += n as usize;
-        } else {
+        } else if (n.abs() as usize) < self.index {
             self.index -= n.abs() as usize;
+        } else {
+            self.index = 0;
         }
+
+        let (bounded_indx, content) = buf.layout(self.index as u16);
+        self.index = bounded_indx as usize;
+        frm.update(content)
+    }
+
+    pub fn insert(&mut self, text: &str) -> Result<(), mpsc::SendError<FrameCmd>> {
+        let buf = &mut *self.buffer.borrow_mut();
+        let frm = &*self.frame.borrow();
+
+        buf.insert(self.index, text);
+        let (bounded_indx, content) = buf.layout(self.index as u16 + 1);
+        self.index = bounded_indx as usize;
+        frm.update(content)
     }
 }
+
+impl LispForm for Cursor {
+    fn rust_name(&self) -> &'static str {
+        "editor::Cursor"
+    }
+
+    fn lisp_name(&self) -> &'static str {
+        "cursor"
+    }
+
+    fn as_any(&mut self) -> &mut Any {
+        self
+    }
+}
+
+impl fmt::Debug for Cursor {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Cursor {{ indx: {} }}", self.index)
+    }
+}
+
+def_builtin! { "forward-char", ForwardCharBuiltin, Evaluated, lsp, args; {
+    let n = args.next().unwrap_or(&LispObj::Int(1)).int_val()?;
+    let cur = &lsp.globals.get_val(symbols::CURRENT_CURSOR).unwrap();
+
+    with_downcast!(lsp, cur, Cursor; {
+        cur.mov(*n as isize).unwrap();
+        LispObj::nil()
+    })
+}}
 
 pub fn start() {
     let (frm_cmd_send, frm_cmd_recv) = channel::<FrameCmd>();
@@ -299,33 +356,57 @@ pub fn start() {
         let mut frame = OrbFrame::new(frm_evt_send, frm_cmd_recv);
         frame.start();
     });
+    let framecell = Rc::new(RefCell::new(FrameProxy::new(frm_cmd_send,
+                                                         frm_evt_recv)));
     let bufcell = Rc::new(RefCell::new(Buffer::new()));
     //let echo_bufcell = Rc::new(RefCell::new(Buffer::new()));
     //let mini_bufcell = Rc::new(RefCell::new(Buffer::new()));
     let mut cbuf = String::with_capacity(4);
-    let mut cursor = Cursor::new();
+    let cursorcell = Rc::new(RefCell::new(Cursor::new(bufcell.clone(),
+                                                          framecell.clone())));
     let global_keymapcell = Rc::new(RefCell::new(Keymap::new()));
     let mut lsp = Lsp::new();
 
-    reg_funcs!(lsp; KeymapBuiltin, DefineKeyBuiltin);
+    reg_funcs!(lsp; ForwardCharBuiltin, KeymapBuiltin, DefineKeyBuiltin);
+
     lsp.set_global("global-map",
                    LispObj::Ext(Rc::clone(&global_keymapcell) as External));
+    lsp.set_global("current-buffer",
+                   LispObj::Ext(Rc::clone(&bufcell) as External));
+    lsp.set_global("current-frame",
+                   LispObj::Ext(Rc::clone(&framecell) as External));
+    lsp.set_global("current-cursor",
+                   LispObj::Ext(Rc::clone(&cursorcell) as External));
+
     if let Err(e) = lsp.load("editor") {
         println!("LISP ERROR: {}", e);
         return;
     }
 
-    frm_cmd_send.send(FrameCmd::Show).unwrap();
     {
         let buf = &*bufcell.borrow();
-        frm_cmd_send.send(FrameCmd::Update(buf.layout(cursor))).unwrap();
+        let frm = &*framecell.borrow();
+        frm.show().unwrap();
+        let (_, content) = buf.layout(0);
+        frm.update(content).unwrap();
     }
 
-    while let Ok(evt) = frm_evt_recv.recv() {
+    loop {
+        let evt = {
+            let frame = &*framecell.borrow();
+            match frame.listen() {
+                Ok(res) => res,
+                Err(e) => {
+                    println!("FRAME CHANNEL FAILED: {}", e);
+                    break;
+                },
+            }
+        };
         println!("RECEIVED EVENT: {:?}", evt);
         match evt {
             UserEvent::Quit => {
-                frm_cmd_send.send(FrameCmd::Quit).unwrap();
+                let frame = &*framecell.borrow();
+                frame.quit().unwrap();
                 break;
             },
             UserEvent::Key(kevt) => {
@@ -342,48 +423,18 @@ pub fn start() {
                         s => println!("LISP SAYS: {:?}", s),
                     }
                 } else {
-                    let buf = &mut *bufcell.borrow_mut();
+                    let cursor = &mut *cursorcell.borrow_mut();
 
                     match kevt {
                         Event { basic: BasicEvent::Char(c), modifiers: _ } => {
                             cbuf.push(c);
-                            buf.insert(&cursor, &cbuf);
+                            cursor.insert(&cbuf).unwrap();
                             cbuf.pop();
-                            cursor.mov(1);
-                            frm_cmd_send.send(FrameCmd::Update(buf.layout(cursor))).unwrap();
                         },
                         bevt => println!("Unhandled {:?}", bevt),
                     }
                 }
             }
         }
-    }
-}
-
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn find_file() {
-        let fname = "lisp/demo.el";
-        let mut ebuf = Buffer::new();
-
-        assert_eq!(Ok(()), ebuf.find_file(fname));
-        assert!(ebuf.gap_buf.len() > 0);
-    }
-
-    #[test]
-    fn insert_small() {
-        let mut ebuf = Buffer::new();
-
-        ebuf.insert(0, "Blh");
-        assert_eq!(&ebuf.gap_buf[..3], "Blh");
-        assert_eq!(ebuf.gap_indx, 3);
-
-        ebuf.insert(2, "aaaa");
-        let res: String = ebuf.chars().collect();
-        assert_eq!(&res, "Blaaaah");
     }
 }

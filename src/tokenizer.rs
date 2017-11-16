@@ -100,42 +100,55 @@ pub trait Tokenizer {
                 -> Result<Token, &'static str> {
         let mut s = String::new();
         let mut num = Number::default();
+        let mut seen_digit = false;
         // let mut seen_e = false;
         // let mut seen_dot = false;
-        // let mut seen_sign = false;
+        let mut seen_sign = false;
         s.push(l);
 
+        // Try to parse token as number
         match l {
             '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' => {
-                while let Some(&c) = itr.peek() {
-                    match c {
-                        ' ' | '\t' | '\n' | '\r' | '(' | '{' | '[' | ']' | '}' | ')' => {
-                            return match s.parse::<i32>() {
-                                Ok(i) => {
-                                    num.significand = i;
-                                    Ok(Token::Num(num))
-                                },
-                                Err(e) => {
-                                    panic!("Rust can not parse '{}' into an integer: {}",
-                                           s, e)
-                                },
-                            };
-                        },
-                        '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' => {
-                            s.push(c);
-                            itr.next()
-                        },
-                        _ => {
-                            s.push(c);
-                            itr.next();
-                            break;
-                        },
-                    };
-                }
+                seen_digit = true;
             },
+            '-' => seen_sign = true,
             _ => (),
         }
 
+        if seen_digit || seen_sign {
+            while let Some(&c) = itr.peek() {
+                match c {
+                    ' ' | '\t' | '\n' | '\r' | '(' | '{' | '[' | ']' | '}' | ')' => {
+                        if !seen_digit {
+                            break;
+                        }
+                        return match s.parse::<i32>() {
+                            Ok(i) => {
+                                num.significand = i;
+                                Ok(Token::Num(num))
+                            },
+                            Err(e) => {
+                                panic!("Rust can not parse '{}' into an integer: {}",
+                                       s, e)
+                            },
+                        };
+                    },
+                    '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' => {
+                        seen_digit = true;
+                        s.push(c);
+                        itr.next()
+                    },
+                    _ => {
+                        s.push(c);
+                        itr.next();
+                        break;
+                    },
+                };
+            }
+        }
+
+
+        // If parsing token a number fails parse it as an atom
         while let Some(&c) = itr.peek() {
             match c {
                 ' ' | '\t' | '\n' | '\r' | '(' | '{' | '[' | ']' | '}' | ')' => {
@@ -216,5 +229,14 @@ mod tests {
 
         let res = nizer.tokenize(&lisp.into()).unwrap();
         assert_eq!(res[3], Token::Num(Number { significand: 1234 } ));
+    }
+
+    #[test]
+    fn neg_number() {
+        let mut nizer = TestTokenizer::new();
+        let lisp = "( -1 )";
+
+        let res = nizer.tokenize(&lisp.into()).unwrap();
+        assert_eq!(res[1], Token::Num(Number { significand: -1 } ));
     }
 }

@@ -1,9 +1,12 @@
+use std::any::Any;
 use std::borrow::Borrow;
-use std::{iter, ptr};
+use std::{iter, ptr, fmt};
 use std::fs::File;
 use std::io::Read;
 use std::sync::{Arc, RwLock};
 use std::str;
+
+use rselisp::LispForm;
 
 use editor::*;
 
@@ -92,8 +95,7 @@ impl Buffer {
         self.gap_buf.len() - self.gap_len
     }
 
-    pub fn insert(&mut self, cur: &Cursor, text: &str) {
-        let indx = cur.index();
+    pub fn insert(&mut self, indx: usize, text: &str) {
         debug_assert!(indx <= self.len());
         if indx != self.gap_indx {
             unsafe { self.mov_gap(indx); }
@@ -127,7 +129,7 @@ impl Buffer {
             .chain(self.gap_buf.chars().skip(self.gap_indx + self.gap_len))
     }
 
-    pub fn layout(&self, cur: Cursor) -> Content {
+    pub fn layout(&self, cur: u16) -> (u16, Content) {
         let mut text = String::new();
         let mut itr = self.chars();
         let mut frag = Fragment::new();
@@ -135,6 +137,7 @@ impl Buffer {
         let fonts: &FontCache = &*(self.fonts.borrow() as &RwLock<FontCache>).read().unwrap();
         let dfont: &Font = fonts.get(0);
         let mut indx = 0;
+        let mut count = 0;
 
         macro_rules! push_frag {
             () => {
@@ -146,26 +149,40 @@ impl Buffer {
             }
         }
 
+        macro_rules! set_curs {
+            () => {
+                frag.style = Style::Cursor;
+                frag.width += dfont.width;
+            }
+        }
+
         while let Some(c) = itr.next() {
             match c {
                 '\n' => {
+                    if count == cur {
+                        push_frag!();
+                        set_curs!();
+                    }
                     frag.layout = Layout::FlowBreak;
                     push_frag!();
                 },
                 '\t' => {
+                    if count == cur {
+                        push_frag!();
+                        frag.style = Style::Cursor;
+                    }
                     frag.width += dfont.width * 4 - frag.width % (dfont.width * 4);
                     push_frag!();
                 },
                 c => {
-                    if indx == cur.index() as u16 {
+                    if count == cur {
                         push_frag!();
                         frag.text = FragmentText::Indx {
                             start: indx,
                             end: indx + 1,
                             font: 0,
                         };
-                        frag.style = Style::Cursor;
-                        frag.width += dfont.width;
+                        set_curs!();
                         text.push(c);
                         push_frag!();
                     } else {
@@ -185,9 +202,10 @@ impl Buffer {
                     indx += 1;
                 }
             }
+            count += 1;
         }
 
-        if cur.index() as u16 >= indx {
+        if cur >= count {
             push_frag!();
             frag.style = Style::Cursor;
             frag.width = dfont.width;
@@ -197,11 +215,11 @@ impl Buffer {
         }
         frags.push(frag);
 
-        Content {
+        (cur.min(count), Content {
             text: text,
             fonts: self.fonts.clone(),
             frags: frags,
-        }
+        })
     }
 
     pub fn mode_line_layout(&self) -> Content {
@@ -210,5 +228,52 @@ impl Buffer {
             fonts: self.fonts.clone(),
             frags: vec![Fragment::new()],
         }
+    }
+}
+
+impl LispForm for Buffer {
+    fn rust_name(&self) -> &'static str {
+        "buffer::Buffer"
+    }
+
+    fn lisp_name(&self) -> &'static str {
+        "buffer"
+    }
+
+    fn as_any(&mut self) -> &mut Any {
+        self
+    }
+}
+
+impl fmt::Debug for Buffer {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Buffer {{ ... }}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn find_file() {
+        let fname = "lisp/demo.el";
+        let mut ebuf = Buffer::new();
+
+        assert_eq!(Ok(()), ebuf.find_file(fname));
+        assert!(ebuf.gap_buf.len() > 0);
+    }
+
+    #[test]
+    fn insert_small() {
+        let mut ebuf = Buffer::new();
+
+        ebuf.insert(0, "Blh");
+        assert_eq!(&ebuf.gap_buf[..3], "Blh");
+        assert_eq!(ebuf.gap_indx, 3);
+
+        ebuf.insert(2, "aaaa");
+        let res: String = ebuf.chars().collect();
+        assert_eq!(&res, "Blaaaah");
     }
 }
