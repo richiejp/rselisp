@@ -35,19 +35,35 @@ pub fn lisp_fn(attr_ts: TokenStream, fn_ts: TokenStream) -> TokenStream {
         }
     };
 
+    let name = format!("{}", func.name);
     let rname = {
-        let name = format!("{}", func.name);
         let c = name.chars().next().map(|c| c.to_uppercase()).unwrap();
         syn::Ident::new(format!("{}{}Builtin", c, name.split_at(1).1))
     };
 
-    let name = func.name.clone();
+    let fn_name = func.name.clone();
 
     let tokens = quote! {
-        #[derive(Clone, Debug)]
+        #[derive(Clone)]
         pub struct #rname {
             name: ::rselisp::symbols::Atom,
         }
+
+        impl #rname {
+            #[allow(dead_code)]
+            pub fn new_ar(atoms: &mut ::rselisp::symbols::AtomRegistry) -> #rname {
+                #rname {
+                    name: atoms.atomize(#name),
+                }
+            }
+
+            pub fn new(lsp: &mut ::rselisp::Lsp) -> #rname {
+                #rname {
+                    name: lsp.atomize(#name),
+                }
+            }
+        }
+
 
         impl ::rselisp::lambda::Func for #rname {
             fn eval_args(&self) -> ::rselisp::lambda::EvalOption {
@@ -60,7 +76,16 @@ pub fn lisp_fn(attr_ts: TokenStream, fn_ts: TokenStream) -> TokenStream {
 
             fn call(&self, lsp: &mut ::rselisp::Lsp, args: &mut std::slice::Iter<::rselisp::LispObj>)
                 -> Result<::rselisp::LispObj, String> {
-                #name(lsp, args)
+                #fn_name(lsp, args)
+            }
+        }
+
+        impl ::std::fmt::Debug for #rname {
+            fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+                write!(f,
+                       concat!(stringify!(#rname),
+                               " {{ name: ", #name, " ({:?}), }} "),
+                       self.name)
             }
         }
 
