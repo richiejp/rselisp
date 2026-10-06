@@ -12,9 +12,9 @@ use rselisp::{Lsp, LispObj, Sexp, LispForm, External};
 use rselisp::symbols::{self, Symbol, Atom, AtomRegistry};
 use rselisp::lambda::{Func, EvalOption};
 
-use frame::{Frame, FrameProxy, OrbFrame, FrameCmd};
-use buffer::{Buffer};
-use keymap::{Keymap, KeymapBuiltin, DefineKeyBuiltin};
+use crate::frame::{Frame, FrameProxy, OrbFrame, FrameCmd};
+use crate::buffer::{Buffer};
+use crate::keymap::{Keymap, KeymapBuiltin, DefineKeyBuiltin};
 
 pub struct Font {
     //index: u8,
@@ -181,7 +181,7 @@ impl LispForm for EventModifiers {
         Ok(LispObj::Sxp(mods))
     }
 
-    fn as_any(&mut self) -> &mut Any {
+    fn as_any(&mut self) -> &mut dyn Any {
         self
     }
 }
@@ -211,7 +211,7 @@ impl LispForm for BasicEvent {
         })
     }
 
-    fn as_any(&mut self) -> &mut Any {
+    fn as_any(&mut self) -> &mut dyn Any {
         self
     }
 }
@@ -251,7 +251,7 @@ impl LispForm for Event {
         ])))
     }
 
-    fn as_any(&mut self) -> &mut Any {
+    fn as_any(&mut self) -> &mut dyn Any {
         self
     }
 }
@@ -328,7 +328,7 @@ impl LispForm for Cursor {
         "cursor"
     }
 
-    fn as_any(&mut self) -> &mut Any {
+    fn as_any(&mut self) -> &mut dyn Any {
         self
     }
 }

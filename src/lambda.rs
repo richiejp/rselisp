@@ -16,7 +16,7 @@ pub trait Func: fmt::Debug {
     /// The canonical name of this function
     fn name(&self) -> Atom;
     /// Evaluate this function
-    fn call(&self, &mut Lsp, &mut Iter<LispObj>) -> Result<LispObj, String>;
+    fn call(&self, lsp: &mut Lsp, args: &mut Iter<LispObj>) -> Result<LispObj, String>;
 }
 
 #[derive(Clone, Debug)]

@@ -7,7 +7,7 @@ use orbclient::{self, Window, Renderer, EventOption, WindowFlag, Color};
 
 use rselisp::LispForm;
 
-use editor::*;
+use crate::editor::*;
 
 /// An OS window
 ///
@@ -64,7 +64,7 @@ impl LispForm for FrameProxy {
         "frame"
     }
 
-    fn as_any(&mut self) -> &mut Any {
+    fn as_any(&mut self) -> &mut dyn Any {
         self
     }
 }

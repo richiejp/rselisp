@@ -302,7 +302,7 @@ pub trait LispForm: fmt::Debug {
                     self.rust_name(), self.lisp_name()))
     }
 
-    fn from_lisp(&self, LispObj) -> Result<LispObj, String> {
+    fn from_lisp(&self, _ : LispObj) -> Result<LispObj, String> {
         Err(format!("Type {} ({}) can not be created from Lisp",
                     self.rust_name(), self.lisp_name()))
     }

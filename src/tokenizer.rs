@@ -15,7 +15,7 @@
 
 use std::str::Chars;
 use std::iter::Peekable;
-use symbols::{Atom, AtomRegistry};
+use crate::symbols::{Atom, AtomRegistry};
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct Number {
@@ -191,7 +191,7 @@ pub trait Tokenizer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use symbols;
+    use crate::symbols;
 
     struct TestTokenizer {
         atoms: AtomRegistry,

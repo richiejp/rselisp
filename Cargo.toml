@@ -2,10 +2,14 @@
 name = "rselisp"
 version = "0.1.0"
 authors = ["Richard Palethorpe <richiejp@f-m.fm>"]
+edition = "2018"
 
 [dependencies]
 fnv = "*"
 orbclient = "*"
+
+[dev-dependencies]
+criterion = "0.8"
 
 [profile.bench]
 opt-level = 3
@@ -13,4 +17,4 @@ debug = 2
 
 [[bench]]
 name = "perf"
-path = "tests/perf.rs"
+harness = false

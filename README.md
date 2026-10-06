@@ -50,7 +50,8 @@ $ cargo run -- --editor
 
 ![Mock Editor](mock-editor.png)
 
-Benchmarks can be run with `cargo bench` and unit tests with `cargo test`. To
+Criterion benchmarks in `benches/perf.rs` can be run on stable Rust with
+`cargo bench --bench perf`, and unit tests with `cargo test`. To
 see what functions are implemented check `src/builtins.rs`.
 
 Status & goals

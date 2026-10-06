@@ -1,12 +1,10 @@
-#![feature(test)]
-extern crate test;
+extern crate criterion;
 extern crate rselisp;
 
-use test::Bencher;
+use criterion::{criterion_group, criterion_main, Criterion};
 use rselisp::{Lsp, LispObj};
 
-#[bench]
-fn fib(b: &mut Bencher) {
+fn fib(c: &mut Criterion) {
     let mut lsp = Lsp::new();
     let src = r#"
 (fset 'fib
@@ -21,11 +19,12 @@ fn fib(b: &mut Bencher) {
 "#.to_owned();
     let ast = lsp.read(&src).unwrap();
 
-    b.iter(|| assert_eq!(Ok(LispObj::Int(10946)), lsp.eval(&ast)));
+    c.bench_function("fib", |b| {
+        b.iter(|| assert_eq!(Ok(LispObj::Int(10946)), lsp.eval(&ast)))
+    });
 }
 
-#[bench]
-fn cons(b: &mut Bencher) {
+fn cons(c: &mut Criterion) {
     let mut lsp = Lsp::new();
     let src = r#"
 (fset 'repeat
@@ -44,5 +43,8 @@ fn cons(b: &mut Bencher) {
 "#.to_owned();
     let ast = lsp.read(&src).unwrap();
 
-    b.iter(|| lsp.eval(&ast));
+    c.bench_function("cons", |b| b.iter(|| lsp.eval(&ast)));
 }
+
+criterion_group!(benches, fib, cons);
+criterion_main!(benches);

@@ -16,7 +16,7 @@
 use rselisp::{Lsp, LispObj, LispForm, Sexp};
 use rselisp::lambda::{Func, EvalOption};
 use rselisp::symbols::{Atom, AtomRegistry};
-use editor::{Event, BasicEvent, EventModifiers};
+use crate::editor::{Event, BasicEvent, EventModifiers};
 use fnv::FnvHashMap;
 use std::any::Any;
 use std::slice::Iter;
@@ -85,7 +85,7 @@ impl Keymap {
         self.map.get(key)
     }
 
-    pub fn is_keymap(obj: &LispForm) -> bool {
+    pub fn is_keymap(obj: &dyn LispForm) -> bool {
         obj.lisp_name() == "keymap"
     }
 }

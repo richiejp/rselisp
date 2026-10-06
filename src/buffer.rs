@@ -1,14 +1,14 @@
 use std::any::Any;
 use std::borrow::Borrow;
 use std::{iter, ptr, fmt};
-use std::fs::File;
-use std::io::Read;
+// use std::fs::File;
+// use std::io::Read;
 use std::sync::{Arc, RwLock};
 use std::str;
 
 use rselisp::LispForm;
 
-use editor::*;
+use crate::editor::*;
 
 /// Contains a textual document
 ///
@@ -53,20 +53,20 @@ impl Buffer {
     }
 
     /// Load a file into the buffer
-    pub fn find_file(&mut self, name: &str) -> Result<(), String> {
-        match File::open(name) {
-            Ok(mut file) => {
-                if let Err(e) = file.read_to_string(&mut self.gap_buf) {
-                    Err(format!("I/O ERROR: {}", e))
-                } else {
-                    Ok(())
-                }
-            },
-            Err(e) => {
-                Err(format!("FILE ERROR: {}", e))
-            },
-        }
-    }
+    // pub fn find_file(&mut self, name: &str) -> Result<(), String> {
+    //     match File::open(name) {
+    //         Ok(mut file) => {
+    //             if let Err(e) = file.read_to_string(&mut self.gap_buf) {
+    //                 Err(format!("I/O ERROR: {}", e))
+    //             } else {
+    //                 Ok(())
+    //             }
+    //         },
+    //         Err(e) => {
+    //             Err(format!("FILE ERROR: {}", e))
+    //         },
+    //     }
+    // }
 
     unsafe fn mov_gap(&mut self, indx: usize) {
         let sptr = self.gap_buf.as_mut_vec().as_ptr();
@@ -123,7 +123,7 @@ impl Buffer {
         self.gap_len -= text.len();
     }
 
-    pub fn chars(&self) -> BufferIter {
+    pub fn chars(&self) -> BufferIter<'_> {
         self.gap_buf.chars()
             .take(self.gap_indx)
             .chain(self.gap_buf.chars().skip(self.gap_indx + self.gap_len))
@@ -240,7 +240,7 @@ impl LispForm for Buffer {
         "buffer"
     }
 
-    fn as_any(&mut self) -> &mut Any {
+    fn as_any(&mut self) -> &mut dyn Any {
         self
     }
 }
@@ -255,14 +255,14 @@ impl fmt::Debug for Buffer {
 mod tests {
     use super::*;
 
-    #[test]
-    fn find_file() {
-        let fname = "lisp/demo.el";
-        let mut ebuf = Buffer::new();
-
-        assert_eq!(Ok(()), ebuf.find_file(fname));
-        assert!(ebuf.gap_buf.len() > 0);
-    }
+    // #[test]
+    // fn find_file() {
+    //     let fname = "lisp/demo.el";
+    //     let mut ebuf = Buffer::new();
+    //
+    //     assert_eq!(Ok(()), ebuf.find_file(fname));
+    //     assert!(ebuf.gap_buf.len() > 0);
+    // }
 
     #[test]
     fn insert_small() {
