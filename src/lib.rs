@@ -87,8 +87,8 @@ pub enum LispObj {
 }
 
 pub type LispObjRef = Rc<RefCell<LispObj>>;
-pub type External = Rc<RefCell<LispForm>>;
-pub type ExternalFun = Rc<Func>;
+pub type External = Rc<RefCell<dyn LispForm>>;
+pub type ExternalFun = Rc<dyn Func>;
 
 macro_rules! gen_to_vals {
     ( $( $fn:ident, $inner:ident, $type:ident );+ ) => ($(
@@ -307,7 +307,7 @@ pub trait LispForm: fmt::Debug {
                     self.rust_name(), self.lisp_name()))
     }
 
-    fn as_any(&mut self) -> &mut Any;
+    fn as_any(&mut self) -> &mut dyn Any;
 }
 
 /// Try to downcast an External trait to its concrete type
@@ -515,7 +515,7 @@ impl Lsp {
         }
 
         write!(stream, "(")?;
-        self.print_itr(stream, itr);
+        self.print_itr(stream, itr)?;
         write!(stream, ")")
     }
 
@@ -532,9 +532,10 @@ impl Lsp {
     }
 
     pub fn error_print(&self, msg: &str, obj: &LispObj) -> String {
-        let mut s = String::new();
-        write!(s, "{}: ", msg);
-        self.print(&mut s, obj);
+        let mut s = format!("{}: ", msg);
+        if let Err(err) = self.print(&mut s, obj) {
+            println!("ERROR: failed printing obj to string: {}", err);
+        };
         s
     }
 
@@ -589,7 +590,7 @@ impl Lsp {
     }
 
     #[inline]
-    fn apply(&mut self, fun: &Func, args: &mut Iter<LispObj>) -> Result<LispObj, String> {
+    fn apply(&mut self, fun: &dyn Func, args: &mut Iter<LispObj>) -> Result<LispObj, String> {
         match fun.eval_args() {
             EvalOption::Evaluated => {
                 let ev_args = self.eval_rest(args)?;
@@ -605,7 +606,7 @@ impl Lsp {
 
         match fun {
             &LispObj::Lambda(ref lmbda) => self.apply(lmbda, args),
-            &LispObj::ExtFun(ref extf) => self.apply(Rc::borrow(extf) as &Func, args),
+            &LispObj::ExtFun(ref extf) => self.apply(Rc::borrow(extf) as &dyn Func, args),
             &LispObj::Sxp(ref x) => self.eval_primitive(x, args),
             obj => Err(self.error_print("Invalid as a function", obj)),
         }

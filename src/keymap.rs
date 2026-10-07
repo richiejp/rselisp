@@ -109,7 +109,7 @@ impl LispForm for Keymap {
         Ok(LispObj::Sxp(sxp))
     }
 
-    fn as_any(&mut self) -> &mut Any {
+    fn as_any(&mut self) -> &mut dyn Any {
         self
     }
 }

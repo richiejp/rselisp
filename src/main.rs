@@ -50,7 +50,9 @@ fn repl() {
                     Ok(sexp) => match lsp.eval(&sexp) {
                         Ok(LispObj::Atm(symbols::EXIT)) => break,
                         Ok(obj) => {
-                            let _res = lsp.print(&mut obuf, &obj);
+                            if let Err(err) = lsp.print(&mut obuf, &obj) {
+                                println!("PRINT ERROR: {}", err);
+                            }
                             println!("-> {}", obuf);
                             obuf.clear();
                         },

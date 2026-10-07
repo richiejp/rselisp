@@ -126,7 +126,9 @@ def_builtin! { "interactive", InteractiveBuiltin, Unevaluated, _lsp, _args; {
 
 def_builtin! { "print", PrintBuiltin, Evaluated, lsp, args; {
     let mut s = String::new();
-    lsp.print_itr(&mut s, args.peekable());
+    if let Err(err) = lsp.print_itr(&mut s, args.peekable()) {
+        println!("ERROR PRINTING {}", &err)
+    }
     println!("{}", &s);
     Ok(LispObj::Str(s))
 }}
@@ -269,7 +271,7 @@ def_builtin! { "fset", FsetBuiltin, Evaluated, lsp, args; {
     let (sym, def) = take2!(args);
 
     let def = match def {
-        Some(ref obj) => obj.clone(),
+        Some(ref obj) => *obj,
         _ => return Err(format!("fset requires two arguments")),
     };
 

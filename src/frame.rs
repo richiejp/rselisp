@@ -1,3 +1,4 @@
+use unicode_segmentation::UnicodeSegmentation;
 use std::any::Any;
 use std::borrow::Borrow;
 use std::{fmt, time, thread};
@@ -142,8 +143,11 @@ impl OrbFrame {
 
             if let FragmentText::Indx { start: s, end: e, font: f } = frag.text {
                 let chr_width = fonts.get(f as usize).width;
-                for (i, chr) in stuff.text[s as usize .. e as usize].chars().enumerate() {
-                    win.char(u as i32 + chr_width as i32 * i as i32, v as i32, chr, fg);
+                for (i, grapheme) in stuff.text[s..e].graphemes(true).enumerate() {
+                    // The simple renderer has no shaping; keep each cluster in one cell.
+                    for chr in grapheme.chars() {
+                        win.char(u as i32 + chr_width as i32 * i as i32, v as i32, chr, fg);
+                    }
                 }
             }
 

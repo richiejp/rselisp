@@ -18,7 +18,7 @@ use crate::keymap::{Keymap, KeymapBuiltin, DefineKeyBuiltin};
 
 pub struct Font {
     //index: u8,
-    pub name: String,
+    // pub name: String,
     pub width: u16,
     pub height: u16,
 }
@@ -27,7 +27,7 @@ impl Font {
     pub fn default() -> Font {
         Font {
             //index: 0,
-            name: "unifont".to_owned(),
+            // name: "unifont".to_owned(),
             width: 8,
             height: 16,
         }
@@ -60,8 +60,8 @@ impl FontCache {
 pub enum FragmentText {
     None,
     Indx {
-        start: u16,
-        end: u16,
+        start: usize,
+        end: usize,
         font: u8,
     },
 }
@@ -264,6 +264,18 @@ pub enum ComResult {
     Quit,
 }
 
+#[derive(Debug)]
+pub enum CursorError {
+    SendError(mpsc::SendError<FrameCmd>),
+    InvalidIndex(isize),
+}
+
+impl From<mpsc::SendError<FrameCmd>> for CursorError {
+    fn from(err: mpsc::SendError<FrameCmd>) -> Self {
+        Self::SendError(err)
+    }
+}
+
 /// The blinky thing which text comes out of
 ///
 /// Actually this represents a many-to-many relation between Buffers and
@@ -274,6 +286,7 @@ pub struct Cursor {
     frame: Rc<RefCell<FrameProxy>>,
     //mark: usize,
     //scroll: usize,
+    // Grapheme offset in the document, not a byte offset.
     index: usize,
 }
 
@@ -287,34 +300,30 @@ impl Cursor {
         }
     }
 
-    pub fn index(&self) -> usize {
-        self.index
-    }
+    // pub fn index(&self) -> usize {
+    //     self.index
+    // }
 
-    pub fn mov(&mut self, n: isize) -> Result<(), mpsc::SendError<FrameCmd>> {
+    pub fn mov(&mut self, n: isize) -> Result<(), CursorError> {
         let buf = &mut *self.buffer.borrow_mut();
         let frm = &*self.frame.borrow();
 
-        if n > 0 {
-            self.index += n as usize;
-        } else if (n.abs() as usize) < self.index {
-            self.index -= n.abs() as usize;
-        } else {
-            self.index = 0;
-        }
-
-        let (bounded_indx, content) = buf.layout(self.index as u16);
-        self.index = bounded_indx as usize;
-        frm.update(content)
+        let target = self.index.checked_add_signed(n)
+            .ok_or(CursorError::InvalidIndex(n))?;
+        let (bounded_indx, content) = buf.layout(target);
+        self.index = bounded_indx;
+        Ok(frm.update(content)?)
     }
 
     pub fn insert(&mut self, text: &str) -> Result<(), mpsc::SendError<FrameCmd>> {
         let buf = &mut *self.buffer.borrow_mut();
         let frm = &*self.frame.borrow();
 
-        buf.insert(self.index, text);
-        let (bounded_indx, content) = buf.layout(self.index as u16 + 1);
-        self.index = bounded_indx as usize;
+        let byte = buf.grapheme_to_byte(self.index).unwrap_or(buf.len());
+        buf.insert(byte, text);
+        let target = buf.grapheme_at_or_after(byte + text.len());
+        let (bounded_indx, content) = buf.layout(target);
+        self.index = bounded_indx;
         frm.update(content)
     }
 }
@@ -344,7 +353,7 @@ def_builtin! { "forward-char", ForwardCharBuiltin, Evaluated, lsp, args; {
     let cur = &lsp.globals.get_val(symbols::CURRENT_CURSOR).unwrap();
 
     with_downcast!(lsp, cur, Cursor; {
-        cur.mov(*n as isize).unwrap();
+        cur.mov(*n as isize).map_err(|err| format!("Cursor movement failed: {err:?}"))?;
         LispObj::nil()
     })
 }}
@@ -436,5 +445,57 @@ pub fn start() {
                 }
             }
         }
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cursor() -> (Cursor, mpsc::Receiver<FrameCmd>) {
+        let (send, recv) = channel();
+        let (_, events) = channel();
+        let frame = Rc::new(RefCell::new(FrameProxy::new(send, events)));
+        (Cursor::new(Rc::new(RefCell::new(Buffer::new())), frame), recv)
+    }
+
+    #[test]
+    fn cursor_moves_and_inserts_at_grapheme_positions() {
+        let (mut cursor, _updates) = cursor();
+        cursor.insert("ée\u{301}👩‍💻Z").unwrap();
+        assert_eq!(cursor.index, 4);
+        cursor.mov(-2).unwrap();
+        assert_eq!(cursor.index, 2);
+        cursor.insert("中🙂").unwrap();
+        assert_eq!(cursor.index, 4);
+        assert_eq!(cursor.buffer.borrow().chars().collect::<String>(), "ée\u{301}中🙂👩‍💻Z");
+        cursor.mov(-3).unwrap();
+        assert_eq!(cursor.index, 1);
+        cursor.mov(1).unwrap();
+        cursor.insert("!").unwrap();
+        assert_eq!(cursor.buffer.borrow().chars().collect::<String>(), "ée\u{301}!中🙂👩‍💻Z");
+    }
+
+    #[test]
+    fn cursor_handles_boundaries_and_combining_input() {
+        let (mut cursor, updates) = cursor();
+        assert!(matches!(cursor.mov(-1), Err(CursorError::InvalidIndex(-1))));
+        assert_eq!(cursor.index, 0);
+        assert!(updates.try_recv().is_err());
+        cursor.mov(10).unwrap();
+        assert_eq!(cursor.index, 0);
+        cursor.insert("e").unwrap();
+        cursor.insert("\u{301}").unwrap();
+        assert_eq!(cursor.index, 1);
+        cursor.insert("").unwrap();
+        assert_eq!(cursor.index, 1);
+        cursor.mov(isize::MIN).unwrap_err();
+        assert_eq!(cursor.index, 1);
+        cursor.mov(isize::MAX).unwrap();
+        assert_eq!(cursor.index, 1);
+        cursor.mov(-1).unwrap();
+        cursor.insert("é").unwrap();
+        assert_eq!(cursor.buffer.borrow().chars().collect::<String>(), "ée\u{301}");
     }
 }
